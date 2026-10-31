@@ -1,4 +1,4 @@
-const C = "booth-v1";
+const C = "booth-v2";
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(C).then(c => c.add("./index.html")));
   self.skipWaiting();

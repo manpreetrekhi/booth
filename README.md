@@ -75,6 +75,32 @@ beat grid starts at 0:00, which long intros can shift — close, not perfect.
 True beat-accurate mixing would need the actual audio stream, which YouTube
 doesn't expose.
 
+## Local files mode (the full DJ engine)
+
+The "Your files" panel adds MP3/M4A/WAV files from the device itself. Local
+tracks play through Booth's own Web Audio engine, which unlocks everything
+the YouTube player withholds:
+
+- **True background playback** — local tracks keep playing when you switch
+  apps or lock the screen, with play/pause/next on the lock screen like a
+  music app. (A mixed queue still pauses when it reaches a YouTube track in
+  the background — that limit belongs to YouTube, not Booth.)
+- **Measured BPM and beat grid** from the actual audio — no catalog lookups,
+  no guessing. Analysis runs right after you add a file.
+- **Beat-matched transitions between local tracks**: when tempos are within
+  ~9%, the incoming track is tempo-locked to the outgoing one, starts on the
+  beat (both its own beat grid and the outgoing track's), blends with a bass
+  swap (incoming bass rises as outgoing bass hands over), then eases back to
+  its natural tempo over a few seconds. The status bar marks these
+  "beat-matched".
+- Loudness is measured per file, so leveling works without any lookup.
+
+Files live in the browser's IndexedDB: added once, available every session,
+never uploaded anywhere. Where to get legal files: your own rips/purchases,
+Bandcamp, Beatport (BPM/key included), DJ pools (Beatsource, DJcity), or
+free legal sources like NoCopyrightSounds (ncs.io) and Jamendo for testing.
+Big files use real memory while decoded — the two active decks only.
+
 ## Better transitions
 
 Four things now shape every handover, not just a timer:

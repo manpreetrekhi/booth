@@ -91,6 +91,10 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 .aibar input[type=text]{flex:1;min-width:230px}
 .aibar input[type=password]{max-width:250px}
 .aihint{color:var(--dim);font-size:12.5px;margin:0 0 16px}
+.panel.wide{grid-column:1/-1}
+.filerow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.filerow .ops{display:flex;gap:6px}
+.filerow .ops button{padding:6px 11px;font-size:13.5px}
 .bpm{display:inline-block;margin-left:8px;padding:1px 7px;border:1px solid var(--amber-deep);border-radius:9px;color:var(--amber);font-size:11.5px;font-variant-numeric:tabular-nums;vertical-align:1px}
 
 .results{margin-top:14px;display:grid;gap:8px;max-height:320px;overflow:auto}
@@ -206,6 +210,18 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
     </div>
     <div class="hint">Videos go to the end of the queue; playlists import in order. Use Shuffle below to mix them up.</div>
   </div>
+
+  <div class="panel wide">
+    <h2>Your files</h2>
+    <p>Add MP3/M4A/WAV files stored on this device. They play through Booth's own audio engine: keeps playing in the background with lock-screen controls, BPM and beat grid measured from the real audio, and beat-matched blends between local tracks.</p>
+    <div class="inline" style="flex-wrap:wrap">
+      <button class="primary" id="btnPickFiles">Add audio files</button>
+      <input type="file" id="filePick" accept="audio/*" multiple style="display:none">
+      <button id="btnClearLib">Clear library</button>
+    </div>
+    <div class="results" id="libList"></div>
+    <div class="hint" id="libHint">No files yet. Files are stored in this browser (IndexedDB) and stay available next time.</div>
+  </div>
 </section>
 
 <section class="wrap">
@@ -273,17 +289,20 @@ function introOffset(t){
   return Math.min(45, Math.round(S.intro * bars8));
 }
 /* The per-pair transition decision: how long to blend, from tempo match. */
+function isLocal(t){ return !!(t && t.kind === "local"); }
 function transitionPlan(fromT, toT){
   if(!S.auto || !(fromT && toT && fromT.bpm > 40 && toT.bpm > 40))
-    return {secs: S.xfade, label: null};
+    return {secs: S.xfade, label: null, beatmatch: false};
   const b1 = fromT.bpm, b2 = toT.bpm;
   const diff = Math.abs(b1 - b2) / Math.min(b1, b2);
   const beat = 60 / b1;
-  if(diff < 0.04) return {secs: Math.min(14, Math.max(6, 16 * beat)),
-    label: "long blend — tempos match (" + b1 + " → " + b2 + " bpm)"};
-  if(diff < 0.09) return {secs: Math.min(7, Math.max(3, 8 * beat)),
-    label: "short blend (" + b1 + " → " + b2 + " bpm)"};
-  return {secs: 1.1, label: "quick cut — tempo jump (" + b1 + " → " + b2 + " bpm)"};
+  const bm = isLocal(fromT) && isLocal(toT) && diff < 0.09;
+  const tag = bm ? " · beat-matched" : "";
+  if(diff < 0.04) return {secs: Math.min(14, Math.max(6, 16 * beat)), beatmatch: bm,
+    label: "long blend — tempos match (" + b1 + " → " + b2 + " bpm)" + tag};
+  if(diff < 0.09) return {secs: Math.min(7, Math.max(3, 8 * beat)), beatmatch: bm,
+    label: "short blend (" + b1 + " → " + b2 + " bpm)" + tag};
+  return {secs: 1.1, beatmatch: false, label: "quick cut — tempo jump (" + b1 + " → " + b2 + " bpm)"};
 }
 let active = "A";
 let ytReady = false, probe = null, fadeTimer = null;
@@ -370,18 +389,33 @@ document.addEventListener("visibilitychange", ()=>{
 });
 
 function startSet(){
-  if(!ytReady){ status("Player is still loading — try again in a second."); return; }
+  const firstIdx = (S.pos >= 0 && S.queue[S.pos] && !S.queue[S.pos].bad) ? S.pos : nextIndex();
+  if(!ytReady && !(S.queue[firstIdx] && S.queue[firstIdx].kind === "local")){
+    status("Player is still loading — try again in a second."); return;
+  }
   if(S.pos < 0 || !S.queue[S.pos]) S.pos = -1;
   const i = S.pos >= 0 && S.queue[S.pos] && !S.queue[S.pos].bad ? S.pos : nextIndex();
   if(i === -1){ status("Queue is empty — add some songs first."); return; }
   S.pos = i; S.playing = true;
   keepAwake(true);
+  if(S.queue.some(x => x && x.kind === "local")) actx();   // unlock audio inside this tap
   playOn(active, S.queue[i]);
-  players[other(active)].stopVideo && players[other(active)].stopVideo();
+  deckStop(other(active));
   afterTrackChange();
 }
 function playOn(deck, t){
   deckTrack[deck] = t;
+  if(isLocal(t)){
+    localStart(deck, t, introOffset(t), Math.round(S.vol * vmul(t)))
+      .then(()=>{ setFront(deck); updateMediaSession(); })
+      .catch(()=>{
+        t.bad = true; renderQueue(); save();
+        status("Couldn't play <b>" + hEsc(t.title) + "</b> — file missing or unreadable; skipping.");
+        if(S.playing && deck === active && !S.transitioning) advance(true);
+      });
+    setFront(deck);
+    return;
+  }
   players[deck].loadVideoById({videoId: t.id, startSeconds: introOffset(t)});
   players[deck].setVolume(Math.round(S.vol * vmul(t)));
   if(MOBILE){ try{ players[deck].mute(); }catch(e){} }  // muted start beats mobile autoplay rules
@@ -407,6 +441,69 @@ function crossfadeTo(i, plan){
   const from = active, to = other(active);
   const toT = S.queue[i], fromT = deckTrack[from];
   deckTrack[to] = toT;
+  if(plan.label) status("Transition: " + plan.label + ".");
+
+  const beginFade = (delaySec)=>{
+    const t0 = performance.now() + (delaySec || 0) * 1000;
+    const dur = Math.max(plan.secs * 1000, 400);
+    clearInterval(fadeTimer);
+    fadeTimer = setInterval(()=>{
+      const k = Math.min(Math.max(performance.now() - t0, 0) / dur, 1);
+      const kk = Math.sin(k * Math.PI/2) ** 2;                 // equal-power
+      deckSetVol(to, kk * S.vol * vmul(toT));
+      deckSetVol(from, (1-kk) * S.vol * vmul(fromT));
+      if(plan.beatmatch){                                      // bass swap
+        const dT = L.decks[to], dF = L.decks[from];
+        if(dT) dT.shelf.gain.value = -14 * (1 - kk);
+        if(dF) dF.shelf.gain.value = k > 0.55 ? -14 * Math.min(1, (k - 0.55) / 0.3) : 0;
+      }
+      meter(to, kk * S.vol); meter(from, (1-kk) * S.vol);
+      if(k >= 1){
+        clearInterval(fadeTimer);
+        deckStop(from);
+        if(isLocal(toT)){
+          const d = L.decks[to];
+          if(d){
+            d.shelf.gain.value = 0;
+            if(d.src && Math.abs(d.src.playbackRate.value - 1) > 0.001){
+              try{ d.src.playbackRate.linearRampToValueAtTime(1, actx().currentTime + 6); }catch(e){}
+            }
+          }
+        } else { try{ players[to].unMute(); }catch(e){} }
+        deckSetVol(to, S.vol * vmul(toT));
+        active = to; S.transitioning = false;
+        afterTrackChange();
+      }
+    }, 50);
+  };
+
+  if(isLocal(toT)){
+    (async ()=>{
+      try{
+        let off = introOffset(toT), rate = 1, wait = 0;
+        if(plan.beatmatch && toT.bpm > 40 && fromT && fromT.bpm > 40){
+          rate = fromT.bpm / toT.bpm;                           // tempo-lock incoming
+          if(toT.phase != null){                                // start on ITS beat
+            const bt = 60 / toT.bpm;
+            off = toT.phase + Math.max(0, Math.round((off - toT.phase) / bt)) * bt;
+          }
+          const fi = deckInfo(from);                            // start on OUTGOING's beat
+          if(isLocal(fromT) && fromT.phase != null && fi.d){
+            const bf = 60 / fromT.bpm;
+            wait = (bf - ((fi.t - fromT.phase) % bf) + bf) % bf;
+          }
+        }
+        await localStart(to, toT, off, 0, rate, wait);
+        beginFade(wait);
+      }catch(e){
+        toT.bad = true; S.transitioning = false; renderQueue(); save();
+        status("Couldn't load <b>" + hEsc(toT.title) + "</b> — skipping.");
+        advance(true);
+      }
+    })();
+    setFront(to);
+    return;
+  }
   players[to].loadVideoById({videoId: toT.id, startSeconds: introOffset(toT)});
   players[to].setVolume(0);
   if(MOBILE){ try{ players[to].mute(); }catch(e){} }
@@ -420,34 +517,32 @@ function crossfadeTo(i, plan){
     }catch(e){}
   }, 800);
   setFront(to);
-  if(plan.label) status("Transition: " + plan.label + ".");
-  const t0 = performance.now(), dur = Math.max(plan.secs * 1000, 400);
-  clearInterval(fadeTimer);
-  fadeTimer = setInterval(()=>{
-    const k = Math.min((performance.now()-t0)/dur, 1);
-    const kk = Math.sin(k*Math.PI/2)**2;                       // equal-power
-    try{
-      players[to].setVolume(Math.round(kk * S.vol * vmul(toT)));
-      players[from].setVolume(Math.round((1-kk) * S.vol * vmul(fromT)));
-    }catch(e){}
-    meter(to, kk * S.vol); meter(from, (1-kk) * S.vol);
-    if(k >= 1){
-      clearInterval(fadeTimer);
-      try{ players[from].stopVideo(); players[to].unMute();
-           players[to].setVolume(Math.round(S.vol * vmul(toT))); }catch(e){}
-      active = to; S.transitioning = false;
-      afterTrackChange();
-    }
-  }, 50);
+  beginFade(0);
 }
 function endSet(){
   S.playing = false; S.transitioning = false; clearInterval(fadeTimer);
   keepAwake(false);
-  try{ players.A.stopVideo(); players.B.stopVideo(); }catch(e){}
+  deckStop("A"); deckStop("B");
+  if("mediaSession" in navigator){ try{ navigator.mediaSession.playbackState = "paused"; }catch(e){} }
   status("Set finished — the queue has run out.");
   renderNow(); renderQueue(); renderButtons();
 }
 function pauseResume(){
+  const tr = deckTrack[active];
+  if(isLocal(tr)){
+    const d = L.decks[active]; if(!d) return;
+    if(d.playing && d.pausedAt == null){
+      deckInfo(active);                       // refresh d.pos
+      d.pausedAt = d.pos; d.stopFlag = true;
+      try{ d.src.stop(); }catch(e){} d.src = null; d.playing = false;
+      $("btnPause").textContent = "Resume";
+    } else if(d.pausedAt != null){
+      localResumeFromBuf(active, d.pausedAt);
+      $("btnPause").textContent = "Pause";
+    }
+    updateMediaSession();
+    return;
+  }
   const p = players[active]; if(!p || !p.getPlayerState) return;
   if(p.getPlayerState() === YT.PlayerState.PLAYING){ p.pauseVideo(); $("btnPause").textContent="Resume"; }
   else { p.playVideo(); $("btnPause").textContent="Pause"; }
@@ -456,14 +551,14 @@ function afterTrackChange(){
   S.insertAt = null;
   $("btnPause").textContent="Pause";
   renderNow(); renderQueue(); renderButtons(); save();
+  updateMediaSession();
 }
 
 /* ------- monitor loop: progress + trigger crossfade near track end ------- */
 setInterval(()=>{
-  if(!ytReady) return;
-  const p = players[active];
-  if(p && p.getDuration && S.playing){
-    const d = p.getDuration(), t = p.getCurrentTime();
+  if(S.playing){
+    const info = deckInfo(active);
+    const d = info.d, t = info.t;
     if(d > 1){
       const curTr = S.queue[S.pos];
       const fade = transitionPlan(curTr, S.queue[nextIndex()]).secs;
@@ -477,7 +572,7 @@ setInterval(()=>{
       $("tCur").textContent = fmt(t);
       $("tDur").textContent = effEnd < d ? fmt(effEnd)+" of "+fmt(d) : fmt(d);
       if(!S.transitioning){
-        meter(active, p.getPlayerState()===YT.PlayerState.PLAYING ? S.vol : 0);
+        meter(active, deckIsPlaying(active) ? S.vol : 0);
         meter(other(active), 0);
         const rem = effEnd - t;
         if(hasNext()){
@@ -495,6 +590,14 @@ function meter(deck, v){
   el.classList.toggle("live", v > 2);
 }
 function setFront(deck){
+  const t = deckTrack[deck];
+  if(isLocal(t)){
+    $("hostA").classList.remove("front"); $("hostB").classList.remove("front");
+    const ph = $("videoPh");
+    ph.style.display = "grid";
+    ph.textContent = "♪  " + (t ? t.title : "Local file") + " — playing from this device";
+    return;
+  }
   $("videoPh").style.display = "none";
   $("hostA").classList.toggle("front", deck==="A");
   $("hostB").classList.toggle("front", deck==="B");
@@ -768,7 +871,7 @@ $("auto").onchange = e=>{ S.auto = e.target.checked ? 1 : 0; save(); };
 $("intro").onchange = e=>{ S.intro = +e.target.value; save(); };
 $("vol").oninput = e=>{
   S.vol = +e.target.value;
-  if(!S.transitioning){ try{ players[active].setVolume(Math.round(S.vol * vmul(deckTrack[active]))); }catch(err){} }
+  if(!S.transitioning) deckSetVol(active, S.vol * vmul(deckTrack[active]));
   save();
 };
 
@@ -859,9 +962,240 @@ async function bpmFromPreview(url){
   }catch(e){ return null; }
 }
 setInterval(()=>{
-  const t = S.queue.find(x => !x.an && !x.bad && x.title && !x.title.startsWith("Loading title"));
+  const t = S.queue.find(x => !x.an && !x.bad && x.kind !== "local" && x.title && !x.title.startsWith("Loading title"));
   if(t) analyzeTrack(t);
 }, 2500);
+
+/* ======================= local audio engine (Web Audio) ======================= */
+const L = { ctx: null, lib: new Map(), decks: {A:null, B:null} };
+function actx(){
+  if(!L.ctx) L.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if(L.ctx.state === "suspended") L.ctx.resume();
+  return L.ctx;
+}
+function ldeck(deck){
+  let d = L.decks[deck];
+  if(!d){
+    const ctx = actx();
+    d = {gain: ctx.createGain(), shelf: ctx.createBiquadFilter(), src:null, buf:null,
+         pos:0, lastT:0, playing:false, stopFlag:false, pausedAt:null};
+    d.shelf.type = "lowshelf"; d.shelf.frequency.value = 220; d.shelf.gain.value = 0;
+    d.shelf.connect(d.gain); d.gain.connect(ctx.destination);
+    d.gain.gain.value = 0;
+    L.decks[deck] = d;
+  }
+  return d;
+}
+/* ---- IndexedDB: blobs survive reloads ---- */
+function idb(){ return new Promise((res, rej)=>{
+  const r = indexedDB.open("booth", 1);
+  r.onupgradeneeded = ()=>{ const db = r.result;
+    db.createObjectStore("meta", {keyPath:"id"}); db.createObjectStore("blobs"); };
+  r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error);
+});}
+async function idbPut(store, key, val){ const db = await idb();
+  return new Promise((res, rej)=>{ const tx = db.transaction(store, "readwrite");
+    if(key === undefined) tx.objectStore(store).put(val); else tx.objectStore(store).put(val, key);
+    tx.oncomplete = res; tx.onerror = ()=>rej(tx.error); });}
+async function idbGet(store, key){ const db = await idb();
+  return new Promise((res, rej)=>{ const q = db.transaction(store).objectStore(store).get(key);
+    q.onsuccess = ()=>res(q.result); q.onerror = ()=>rej(q.error); });}
+async function idbAll(store){ const db = await idb();
+  return new Promise((res, rej)=>{ const q = db.transaction(store).objectStore(store).getAll();
+    q.onsuccess = ()=>res(q.result || []); q.onerror = ()=>rej(q.error); });}
+async function idbDel(store, key){ const db = await idb();
+  return new Promise((res, rej)=>{ const tx = db.transaction(store, "readwrite");
+    tx.objectStore(store).delete(key); tx.oncomplete = res; tx.onerror = ()=>rej(tx.error); });}
+/* ---- import + analysis ---- */
+$("btnPickFiles").onclick = ()=> $("filePick").click();
+$("filePick").onchange = async e=>{
+  for(const f of Array.from(e.target.files)) await importFile(f);
+  e.target.value = "";
+};
+async function importFile(f){
+  const id = "loc_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  const meta = {id, kind:"local", title: f.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim(),
+                channel:"Local file", an:0};
+  L.lib.set(id, meta); renderLib();
+  try{
+    await idbPut("blobs", id, f);
+    await idbPut("meta", undefined, meta);
+    status("Saved <b>" + hEsc(meta.title) + "</b> — measuring tempo…");
+    analyzeLocal(meta);
+  }catch(err){
+    L.lib.delete(id); renderLib();
+    status("Couldn't store <b>" + hEsc(meta.title) + "</b> (" + hEsc(err.message||"storage error") + ").");
+  }
+}
+async function analyzeLocal(m){
+  m.an = 1; renderLib();
+  try{
+    const blob = await idbGet("blobs", m.id);
+    const oc = new OfflineAudioContext(1, 32000, 32000);
+    const buf = await oc.decodeAudioData(await blob.arrayBuffer());
+    m.dur = buf.duration;
+    Object.assign(m, analyzeBuffer(buf));
+  }catch(e){}
+  m.an = 2;
+  try{ await idbPut("meta", undefined, m); }catch(e){}
+  renderLib(); syncQueueMeta(m); save();
+}
+function analyzeBuffer(buf){
+  const data = buf.getChannelData(0), sr = buf.sampleRate;
+  const start = Math.floor(data.length * 0.1);
+  const end = Math.min(data.length, start + sr * 90);
+  const hop = 512, win = 1024, env = [];
+  for(let i = start; i + win < end; i += hop){
+    let a = 0; for(let j = 0; j < win; j += 4){ const v = data[i+j]; a += v*v; }
+    env.push(Math.sqrt(a / (win/4)));
+  }
+  if(env.length < 100) return {};
+  const nov = env.map((v,i)=> i ? Math.max(0, v - env[i-1]) : 0);
+  const fps = sr / hop, lo = Math.round(fps*60/180), hi = Math.round(fps*60/60);
+  let best = 0, bestLag = 0;
+  for(let lag = lo; lag <= hi; lag++){
+    let a = 0; for(let i = 0; i + lag < nov.length; i++) a += nov[i]*nov[i+lag];
+    if(a > best){ best = a; bestLag = lag; }
+  }
+  if(!bestLag) return {};
+  let bpm = 60 * fps / bestLag;
+  while(bpm < 70) bpm *= 2; while(bpm > 180) bpm /= 2;
+  const beatF = fps * 60 / bpm;
+  let phase = 0, pb = -1;
+  for(let off = 0; off < beatF; off += beatF/32){
+    let a = 0;
+    for(let i = Math.round(off); i < nov.length; i += Math.round(beatF)) a += nov[i] || 0;
+    if(a > pb){ pb = a; phase = off / fps; }
+  }
+  const beatSec = 60 / bpm;
+  phase = (start/sr + phase) % beatSec;          // beat grid anchored to 0:00
+  const mean = env.reduce((a,b)=>a+b,0) / env.length;
+  const mul = Math.min(1, Math.max(0.55, 0.12 / Math.max(mean, 0.02)));
+  const gainDb = 20 * Math.log10(mul) - 9;       // same scale vmul() expects
+  return {bpm: Math.round(bpm), phase, gain: gainDb};
+}
+function syncQueueMeta(m){
+  let touched = false;
+  S.queue.forEach(t=>{ if(t.kind === "local" && t.id === m.id){
+    t.bpm = m.bpm; t.gain = m.gain; t.phase = m.phase; t.dur = m.dur; touched = true; } });
+  if(touched){ renderQueue(); renderNow(); }
+}
+/* ---- library UI ---- */
+function renderLib(){
+  const box = $("libList"); if(!box) return;
+  box.innerHTML = "";
+  const items = [...L.lib.values()].sort((a,b)=>a.title.localeCompare(b.title));
+  $("libHint").textContent = items.length
+    ? items.length + " file" + (items.length > 1 ? "s" : "") + " stored in this browser — available again next time."
+    : "No files yet. Files are stored in this browser (IndexedDB) and stay available next time.";
+  items.forEach(m=>{
+    const d = document.createElement("div");
+    d.className = "filerow";
+    const bpm = m.bpm ? '<span class="bpm">' + Math.round(m.bpm) + ' bpm</span>'
+                      : (m.an === 1 ? ' <span class="c">analysing…</span>' : '');
+    d.innerHTML = `<span><span class="t">${hEsc(m.title)}</span>${bpm}<br>
+      <span class="c">${m.dur ? fmt(m.dur) + " · " : ""}local file</span></span>
+      <span class="ops"><button data-op="add">Add</button><button data-op="del">Delete</button></span>`;
+    d.querySelector('[data-op=add]').onclick = ()=>{
+      addNextSmart({id:m.id, kind:"local", title:m.title, channel:"Local file",
+                    bpm:m.bpm, gain:m.gain, phase:m.phase, dur:m.dur, an:2});
+      status("Added <b>" + hEsc(m.title) + "</b>"
+        + (S.playing ? " — it plays right after the current song." : " to the queue."));
+    };
+    d.querySelector('[data-op=del]').onclick = async ()=>{
+      L.lib.delete(m.id);
+      try{ await idbDel("meta", m.id); await idbDel("blobs", m.id); }catch(e){}
+      S.queue.forEach(t=>{ if(t.kind === "local" && t.id === m.id) t.bad = true; });
+      renderLib(); renderQueue(); save();
+    };
+    box.appendChild(d);
+  });
+}
+$("btnClearLib").onclick = async ()=>{
+  for(const id of [...L.lib.keys()]){ try{ await idbDel("meta", id); await idbDel("blobs", id); }catch(e){} }
+  L.lib.clear();
+  S.queue.forEach(t=>{ if(t.kind === "local") t.bad = true; });
+  renderLib(); renderQueue(); save();
+  status("Local library cleared.");
+};
+/* ---- playback facade: one surface over YouTube decks and local decks ---- */
+async function localStart(deck, track, offset, vol, rate, startDelay){
+  const d = ldeck(deck);
+  if(d.src){ d.stopFlag = true; try{ d.src.stop(); }catch(e){} d.src = null; }
+  d.pausedAt = null;
+  const blob = await idbGet("blobs", track.id);
+  if(!blob) throw new Error("file missing");
+  const buf = await actx().decodeAudioData(await blob.arrayBuffer());
+  d.buf = buf;
+  const src = actx().createBufferSource();
+  src.buffer = buf; src.playbackRate.value = rate || 1; src.connect(d.shelf);
+  d.src = src; d.stopFlag = false; d.playing = true;
+  const when = actx().currentTime + (startDelay || 0);
+  const off = Math.min(Math.max(offset || 0, 0), Math.max(0, buf.duration - 1));
+  d.pos = off; d.lastT = when;
+  d.gain.gain.value = (vol || 0) / 100;
+  d.shelf.gain.value = 0;
+  src.onended = ()=>{
+    if(d.stopFlag) return;
+    d.playing = false;
+    if(S.playing && deckTrack[deck] === track && deck === active && !S.transitioning) advance(true);
+  };
+  src.start(when, off);
+}
+function localResumeFromBuf(deck, pos){
+  const d = L.decks[deck]; if(!d || !d.buf) return;
+  const src = actx().createBufferSource();
+  src.buffer = d.buf; src.connect(d.shelf);
+  d.src = src; d.stopFlag = false; d.playing = true; d.pausedAt = null;
+  d.pos = pos; d.lastT = actx().currentTime;
+  src.onended = ()=>{ if(!d.stopFlag){ d.playing = false;
+    if(S.playing && deck === active && !S.transitioning) advance(true); } };
+  src.start(0, pos);
+}
+function deckInfo(deck){
+  const t = deckTrack[deck];
+  if(isLocal(t)){
+    const d = L.decks[deck];
+    if(!d || !d.buf) return {t:0, d:0};
+    if(d.pausedAt != null) return {t:d.pausedAt, d:d.buf.duration};
+    if(d.playing){
+      const now = actx().currentTime, dt = Math.max(0, now - d.lastT);
+      d.pos += dt * (d.src ? d.src.playbackRate.value : 1);
+      d.lastT = now;
+    }
+    return {t:d.pos, d:d.buf.duration};
+  }
+  const p = players[deck];
+  if(p && p.getDuration){ try{ return {t:p.getCurrentTime(), d:p.getDuration()}; }catch(e){} }
+  return {t:0, d:0};
+}
+function deckSetVol(deck, v){
+  const t = deckTrack[deck];
+  if(isLocal(t)){ const d = L.decks[deck]; if(d) d.gain.gain.value = Math.max(0, v) / 100; }
+  else { try{ players[deck].setVolume(Math.round(v)); }catch(e){} }
+}
+function deckStop(deck){
+  const d = L.decks[deck];
+  if(d && d.src){ d.stopFlag = true; try{ d.src.stop(); }catch(e){} }
+  if(d){ d.src = null; d.playing = false; d.buf = null; d.pausedAt = null; }
+  try{ players[deck] && players[deck].stopVideo && players[deck].stopVideo(); }catch(e){}
+}
+function deckIsPlaying(deck){
+  const t = deckTrack[deck];
+  if(isLocal(t)){ const d = L.decks[deck]; return !!(d && d.playing && d.pausedAt == null); }
+  try{ return players[deck].getPlayerState() === YT.PlayerState.PLAYING; }catch(e){ return false; }
+}
+function updateMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  const cur = S.queue[S.pos]; if(!cur) return;
+  try{
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: cur.title, artist: cur.channel || "Booth",
+      artwork: [{src:"./icons/icon-192.png", sizes:"192x192", type:"image/png"},
+                {src:"./icons/icon-512.png", sizes:"512x512", type:"image/png"}]});
+    navigator.mediaSession.playbackState = S.playing ? "playing" : "paused";
+  }catch(e){}
+}
 
 /* ============================ AI set planning ============================ */
 function aiHintFn(){
@@ -1037,6 +1371,24 @@ if("serviceWorker" in navigator &&
    (location.protocol === "https:" || ["localhost","127.0.0.1"].includes(location.hostname))){
   navigator.serviceWorker.register("./sw.js").catch(()=>{});
 }
+if("mediaSession" in navigator){
+  try{
+    navigator.mediaSession.setActionHandler("play", ()=>pauseResume());
+    navigator.mediaSession.setActionHandler("pause", ()=>pauseResume());
+    navigator.mediaSession.setActionHandler("nexttrack", ()=>{
+      if(S.playing && !S.transitioning && hasNext()) advance(false);
+    });
+  }catch(e){}
+}
+(async ()=>{
+  try{ (await idbAll("meta")).forEach(m => L.lib.set(m.id, m)); }catch(e){}
+  let changed = false;
+  S.queue.forEach(t=>{
+    if(t.kind === "local" && !L.lib.has(t.id) && !t.bad){ t.bad = true; changed = true; }
+  });
+  renderLib();
+  if(changed){ renderQueue(); save(); }
+})();
 </script>
 </body>
 </html>
