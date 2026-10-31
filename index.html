@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#17151F">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<title>Booth — YouTube auto-DJ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&display=swap" rel="stylesheet">
+<style>
+/* Booth: a late-night radio desk. Amber glows only where sound is live;
+   everything else stays quiet. One family (Archivo), width does the work. */
+:root{
+  --night:#17151F; --panel:#201D2A; --panel2:#262231; --line:#363040;
+  --ink:#EFE9DC; --dim:#9A92A6; --amber:#E8B44C; --amber-deep:#8A6420;
+  --danger:#D96A5B;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--night); color:var(--ink);
+  font-family:"Archivo",system-ui,sans-serif; font-size:15px; line-height:1.45;
+  padding-bottom:64px;
+}
+.wrap{max-width:1060px;margin:0 auto;padding:0 20px}
+
+header{display:flex;align-items:baseline;gap:14px;padding:26px 0 18px;border-bottom:1px solid var(--line)}
+.wordmark{font-variation-settings:"wdth" 125,"wght" 900;font-size:26px;letter-spacing:.5px}
+.wordmark em{font-style:normal;color:var(--amber)}
+header span{color:var(--dim)}
+
+/* ---------------- hero: the booth strip ---------------- */
+.booth{display:grid;grid-template-columns:1fr 380px;gap:28px;padding:26px 0;border-bottom:1px solid var(--line)}
+@media(max-width:860px){.booth{grid-template-columns:1fr}}
+.now small{color:var(--dim)}
+.now h1{font-variation-settings:"wdth" 110,"wght" 800;font-size:clamp(22px,3.4vw,34px);line-height:1.12;margin:6px 0 2px;min-height:1.2em}
+.now .artist{color:var(--dim);font-size:16px;margin-bottom:14px;min-height:1.2em}
+
+.progress{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin:10px 0 6px}
+.progress i{display:block;height:100%;width:0%;background:var(--amber);transition:width .25s linear}
+.times{display:flex;justify-content:space-between;color:var(--dim);font-size:13px;font-variant-numeric:tabular-nums}
+
+/* deck meter: two energy bars that trade during a crossfade */
+.decks{margin:18px 0 6px;display:grid;gap:8px}
+.deck{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:12px;color:var(--dim);font-size:13px}
+.deck .bar{height:10px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.deck .bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--amber-deep),var(--amber));transition:width .12s linear}
+.deck.live{color:var(--ink)}
+.deck.live .bar{border-color:var(--amber-deep);box-shadow:0 0 14px rgba(232,180,76,.22)}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:16px}
+button{
+  font:inherit;color:var(--ink);background:var(--panel2);
+  border:1px solid var(--line);border-radius:7px;padding:9px 16px;cursor:pointer;
+}
+button:hover{border-color:var(--dim)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+button.primary{background:var(--amber);border-color:var(--amber);color:#241B07;font-weight:700}
+button.primary:hover{filter:brightness(1.06)}
+button:disabled{opacity:.45;cursor:default}
+.controls label{color:var(--dim);font-size:13px;display:flex;align-items:center;gap:8px}
+input[type=range]{accent-color:var(--amber);width:110px}
+input[type=checkbox]{accent-color:var(--amber);width:16px;height:16px}
+
+.video{position:relative;aspect-ratio:16/9;background:#0E0C14;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.video .ph{position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);text-align:center;padding:20px}
+.video iframe, .video .ytp{position:absolute;inset:0;width:100%!important;height:100%!important}
+#hostA,#hostB{position:absolute;inset:0;opacity:0;transition:opacity .6s}
+#hostA.front,#hostB.front{opacity:1}
+
+/* ---------------- sources ---------------- */
+.sources{display:grid;grid-template-columns:1fr 1fr;gap:28px;padding:26px 0;border-bottom:1px solid var(--line)}
+@media(max-width:860px){.sources{grid-template-columns:1fr}}
+.panel h2{font-variation-settings:"wdth" 110,"wght" 700;font-size:17px;margin-bottom:4px}
+.panel p{color:var(--dim);font-size:13.5px;margin-bottom:12px}
+.panel p a{color:var(--amber)}
+.inline{display:flex;gap:8px}
+.inline input{flex:1}
+input[type=text],input[type=password]{
+  font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);
+  border-radius:7px;padding:9px 12px;width:100%;
+}
+input::placeholder{color:#6E6680}
+select{font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px}
+select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.aibar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+.aibar input[type=text]{flex:1;min-width:230px}
+.aibar input[type=password]{max-width:250px}
+.aihint{color:var(--dim);font-size:12.5px;margin:0 0 16px}
+.bpm{display:inline-block;margin-left:8px;padding:1px 7px;border:1px solid var(--amber-deep);border-radius:9px;color:var(--amber);font-size:11.5px;font-variant-numeric:tabular-nums;vertical-align:1px}
+
+.results{margin-top:14px;display:grid;gap:8px;max-height:320px;overflow:auto}
+.result{display:grid;grid-template-columns:72px 1fr auto;gap:12px;align-items:center;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px}
+.result img{width:72px;height:40px;object-fit:cover;border-radius:4px;display:block}
+.result .t{font-size:14px;line-height:1.3}
+.result .c{color:var(--dim);font-size:12.5px}
+.result button{padding:7px 12px;font-size:13.5px}
+
+.keyrow{margin-top:14px;display:flex;gap:8px;align-items:center}
+.keyrow input{max-width:340px}
+.hint{color:var(--dim);font-size:12.5px;margin-top:8px}
+
+/* ---------------- queue ---------------- */
+.queuehead{display:flex;align-items:baseline;gap:14px;padding:24px 0 10px}
+.queuehead h2{font-variation-settings:"wdth" 110,"wght" 700;font-size:17px}
+.queuehead span{color:var(--dim);font-size:13.5px}
+.queuehead .spacer{flex:1}
+.qlist{display:grid;gap:6px;padding-bottom:30px}
+.qitem{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:center;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
+.qitem .n{color:var(--dim);font-variant-numeric:tabular-nums;font-size:13px}
+.qitem .t{font-size:14.5px}
+.qitem .c{color:var(--dim);font-size:12.5px}
+.qitem .ops{display:flex;gap:6px}
+.qitem .ops button{padding:5px 9px;font-size:13px}
+.qitem.played{opacity:.45}
+.qitem.current{border-color:var(--amber-deep);box-shadow:0 0 14px rgba(232,180,76,.15)}
+.qitem.current .n{color:var(--amber)}
+.qitem.bad .t{color:var(--danger);text-decoration:line-through}
+.empty{color:var(--dim);padding:18px 0 40px}
+
+/* ---------------- status ---------------- */
+.status{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line)}
+.status .wrap{padding:10px 20px;color:var(--dim);font-size:13.5px}
+.status .wrap b{color:var(--ink);font-weight:600}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <div class="wordmark">BO<em>O</em>TH</div>
+  <span>your YouTube auto-DJ</span>
+</header>
+
+<section class="booth wrap">
+  <div class="now">
+    <small id="nowLabel">Nothing playing yet</small>
+    <h1 id="nowTitle">Load a playlist or search for songs to get started</h1>
+    <div class="artist" id="nowArtist"></div>
+    <div class="progress"><i id="prog"></i></div>
+    <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
+
+    <div class="decks">
+      <div class="deck" id="deckA"><span>Deck A</span><div class="bar"><i></i></div></div>
+      <div class="deck" id="deckB"><span>Deck B</span><div class="bar"><i></i></div></div>
+    </div>
+
+    <div class="controls">
+      <button class="primary" id="btnStart">Start the set</button>
+      <button id="btnPause" disabled>Pause</button>
+      <button id="btnSkip" disabled>Skip</button>
+      <label>Crossfade <input type="range" id="xfade" min="0" max="12" step="1" value="6"><span id="xfadeVal">6s</span></label>
+      <label>Volume <input type="range" id="vol" min="0" max="100" value="100"></label>
+      <label>Per track <select id="cap">
+        <option value="0">Full song</option>
+        <option value="60">1:00</option><option value="90">1:30</option>
+        <option value="120">2:00</option><option value="150">2:30</option>
+        <option value="180">3:00</option><option value="240">4:00</option>
+      </select></label>
+      <label>Switch <select id="smart" title="On phrase: the cutover snaps to the end of an 8-bar musical phrase (needs a detected BPM)">
+        <option value="1">On phrase</option>
+        <option value="0">On the clock</option>
+      </select></label>
+      <label title="Pick the fade per pair of songs: matching tempos get a long blend, tempo jumps get a quick cut"><input type="checkbox" id="auto"> Auto fade</label>
+      <label title="Start incoming songs past their intro (approximate, uses BPM when known)">Intro skip <select id="intro">
+        <option value="0">Off</option><option value="1">8 bars</option><option value="2">16 bars</option>
+      </select></label>
+    </div>
+  </div>
+
+  <div class="video" id="videoBox">
+    <div class="ph" id="videoPh">The video for the live deck shows here</div>
+    <div id="hostA"><div id="ytA"></div></div>
+    <div id="hostB"><div id="ytB"></div></div>
+  </div>
+</section>
+
+<section class="sources wrap">
+  <div class="panel">
+    <h2>Find songs</h2>
+    <p>Search YouTube and add tracks to the queue. Needs a free YouTube API key — <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">get one here</a> (see README).</p>
+    <div class="inline">
+      <input type="text" id="searchBox" placeholder="Search YouTube for a song…">
+      <button id="btnSearch">Search</button>
+    </div>
+    <div class="results" id="searchResults"></div>
+    <div class="keyrow">
+      <input type="password" id="apiKey" placeholder="YouTube Data API key">
+      <button id="btnSaveKey">Save key</button>
+    </div>
+    <div class="hint" id="keyHint">No key saved — search is off, playlists still work.</div>
+  </div>
+
+  <div class="panel">
+    <h2>Add by link</h2>
+    <p>Paste a YouTube video link to queue that one song, or a public playlist link to import all of it. No key needed.</p>
+    <div class="inline">
+      <input type="text" id="plBox" placeholder="Paste a YouTube video or playlist link…">
+      <button id="btnLoadPl">Add</button>
+    </div>
+    <div class="hint">Videos go to the end of the queue; playlists import in order. Use Shuffle below to mix them up.</div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="queuehead">
+    <h2>Queue</h2>
+    <span id="qCount">0 tracks</span>
+    <div class="spacer"></div>
+    <button id="btnShuffle">Shuffle upcoming</button>
+    <button id="btnClear">Clear queue</button>
+  </div>
+  <div class="aibar">
+    <input type="text" id="vibeBox" placeholder="Describe the vibe — e.g. deep house warm-up into peak time">
+    <button class="primary" id="btnPlan">Plan the set</button>
+    <input type="password" id="aKey" placeholder="Anthropic API key">
+    <button id="btnSaveAKey">Save</button>
+    <button id="btnCopyPrompt">Copy prompt</button>
+  </div>
+  <div class="aibar" id="orderRow" style="display:none">
+    <input type="text" id="orderBox" placeholder="Paste the numbers Claude gives back — e.g. 3, 0, 7, 1 …">
+    <button id="btnApplyOrder">Apply order</button>
+  </div>
+  <div class="aihint" id="aiHint"></div>
+  <div class="qlist" id="qlist"></div>
+  <div class="empty" id="qEmpty">The queue is empty. Load a playlist or search for songs.</div>
+</section>
+
+<div class="status"><div class="wrap" id="status">Ready. If the player stays black, serve the folder over http (see README).</div></div>
+
+<!-- probe player used only to read playlist IDs without an API key -->
+<div id="probe" style="position:fixed;width:1px;height:1px;left:-9999px;top:-9999px"></div>
+
+<script>
+"use strict";
+/* ============================ state ============================ */
+const S = {
+  queue: [],        // {id,title,channel,bad}
+  pos: -1,          // index of current track
+  playing: false,
+  transitioning: false,
+  xfade: 6,
+  vol: 100,
+  cap: 0,          // seconds per track; 0 = full song
+  smart: 1,        // 1 = snap cutovers to musical phrases (needs BPM)
+  auto: 1,         // 1 = fade length/style decided per pair from BPM match
+  intro: 0,        // skip incoming intros: 0 off, 1 = ~8 bars, 2 = ~16 bars
+  key: "",         // YouTube Data API key
+  akey: "",        // Anthropic API key (set planning)
+  vibe: "",
+  insertAt: null,  // cursor so several "play next" adds keep their order
+};
+const players = {A:null, B:null};
+const MOBILE = matchMedia("(pointer:coarse)").matches;
+const deckTrack = {A:null, B:null};   // which queue track each deck holds
+
+/* Loudness leveling from Deezer ReplayGain: louder-than-reference masters get
+   pulled down toward a common level. We can only attenuate (YT caps at 100),
+   so it narrows jumps rather than erasing them. */
+function vmul(t){
+  const g = (t && typeof t.gain === "number") ? t.gain : -9;
+  return Math.min(1, Math.max(0.55, Math.pow(10, (g + 9) / 20)));
+}
+function introOffset(t){
+  if(!S.intro || !t) return 0;
+  const bars8 = (t.bpm > 40) ? 32 * 60 / t.bpm : 15;   // one 8-bar phrase
+  return Math.min(45, Math.round(S.intro * bars8));
+}
+/* The per-pair transition decision: how long to blend, from tempo match. */
+function transitionPlan(fromT, toT){
+  if(!S.auto || !(fromT && toT && fromT.bpm > 40 && toT.bpm > 40))
+    return {secs: S.xfade, label: null};
+  const b1 = fromT.bpm, b2 = toT.bpm;
+  const diff = Math.abs(b1 - b2) / Math.min(b1, b2);
+  const beat = 60 / b1;
+  if(diff < 0.04) return {secs: Math.min(14, Math.max(6, 16 * beat)),
+    label: "long blend — tempos match (" + b1 + " → " + b2 + " bpm)"};
+  if(diff < 0.09) return {secs: Math.min(7, Math.max(3, 8 * beat)),
+    label: "short blend (" + b1 + " → " + b2 + " bpm)"};
+  return {secs: 1.1, label: "quick cut — tempo jump (" + b1 + " → " + b2 + " bpm)"};
+}
+let active = "A";
+let ytReady = false, probe = null, fadeTimer = null;
+
+const $ = id => document.getElementById(id);
+const other = d => d === "A" ? "B" : "A";
+const esc = s => { const t=document.createElement("textarea"); t.innerHTML=s||""; return t.value; };
+const hEsc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const fmt = s => { s=Math.max(0,Math.floor(s||0)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
+function status(msg){ $("status").innerHTML = msg; }
+
+/* ============================ persistence ============================ */
+function save(){
+  try{ localStorage.setItem("booth", JSON.stringify(
+    {queue:S.queue, pos:S.pos, xfade:S.xfade, vol:S.vol, cap:S.cap, smart:S.smart, auto:S.auto, intro:S.intro,
+     key:S.key, akey:S.akey, vibe:S.vibe})); }catch(e){}
+}
+function load(){
+  try{
+    const j = JSON.parse(localStorage.getItem("booth")||"{}");
+    if(Array.isArray(j.queue)) S.queue = j.queue;
+    S.queue.forEach(t=>{ if(t.an===1) t.an=0; });  // resume interrupted analysis
+    if(Number.isInteger(j.pos)) S.pos = j.pos;
+    if(j.xfade!=null) S.xfade = +j.xfade;
+    if(j.vol!=null) S.vol = +j.vol;
+    if(j.key) S.key = j.key;
+    if(j.akey) S.akey = j.akey;
+    if(j.cap!=null) S.cap = +j.cap;
+    if(j.smart!=null) S.smart = +j.smart;
+    if(j.auto!=null) S.auto = +j.auto;
+    if(j.intro!=null) S.intro = +j.intro;
+    if(j.vibe) S.vibe = j.vibe;
+  }catch(e){}
+}
+
+/* ============================ YouTube players ============================ */
+const tag = document.createElement("script");
+tag.src = "https://www.youtube.com/iframe_api";
+document.head.appendChild(tag);
+
+window.onYouTubeIframeAPIReady = function(){
+  const opts = host => ({
+    height:"100%", width:"100%",
+    playerVars:{controls:1, rel:0, playsinline:1},
+    events:{ onStateChange:onState, onError:onPlayerError }
+  });
+  players.A = new YT.Player("ytA", opts());
+  players.B = new YT.Player("ytB", opts());
+  ytReady = true;
+  status("Player ready.");
+};
+
+function onState(e){
+  // hard advance when the LIVE deck ends and no crossfade handled it
+  if(e.data === YT.PlayerState.ENDED && e.target === players[active] && S.playing && !S.transitioning){
+    advance(true);
+  }
+}
+function onPlayerError(e){
+  const cur = S.queue[S.pos];
+  if(e.target === players[active] && cur){
+    cur.bad = true;
+    status("<b>"+hEsc(cur.title)+"</b> can't be embedded — skipping it.");
+    renderQueue(); save();
+    if(S.playing && !S.transitioning) advance(true);
+  }
+}
+
+/* ============================ playback engine ============================ */
+function hasNext(){ return nextIndex() !== -1; }
+function nextIndex(){
+  for(let i=S.pos+1;i<S.queue.length;i++) if(!S.queue[i].bad) return i;
+  return -1;
+}
+let wakeLock = null;
+async function keepAwake(on){
+  try{
+    if(on && "wakeLock" in navigator){ wakeLock = await navigator.wakeLock.request("screen"); }
+    else if(!on && wakeLock){ await wakeLock.release(); wakeLock = null; }
+  }catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{
+  if(S.playing && document.visibilityState === "visible") keepAwake(true);
+});
+
+function startSet(){
+  if(!ytReady){ status("Player is still loading — try again in a second."); return; }
+  if(S.pos < 0 || !S.queue[S.pos]) S.pos = -1;
+  const i = S.pos >= 0 && S.queue[S.pos] && !S.queue[S.pos].bad ? S.pos : nextIndex();
+  if(i === -1){ status("Queue is empty — add some songs first."); return; }
+  S.pos = i; S.playing = true;
+  keepAwake(true);
+  playOn(active, S.queue[i]);
+  players[other(active)].stopVideo && players[other(active)].stopVideo();
+  afterTrackChange();
+}
+function playOn(deck, t){
+  deckTrack[deck] = t;
+  players[deck].loadVideoById({videoId: t.id, startSeconds: introOffset(t)});
+  players[deck].setVolume(Math.round(S.vol * vmul(t)));
+  if(MOBILE){ try{ players[deck].mute(); }catch(e){} }  // muted start beats mobile autoplay rules
+  players[deck].playVideo();
+  if(MOBILE) setTimeout(()=>{ try{ players[deck].unMute(); players[deck].setVolume(Math.round(S.vol * vmul(t))); }catch(e){} }, 500);
+  setFront(deck);
+}
+function advance(hard){
+  const i = nextIndex();
+  if(i === -1){ endSet(); return; }
+  const plan = transitionPlan(deckTrack[active], S.queue[i]);
+  S.pos = i;
+  if(hard || plan.secs <= 0){
+    playOn(active, S.queue[i]);
+    afterTrackChange();
+  } else {
+    crossfadeTo(i, plan);
+  }
+}
+function crossfadeTo(i, plan){
+  plan = plan || transitionPlan(deckTrack[active], S.queue[i]);
+  S.transitioning = true;
+  const from = active, to = other(active);
+  const toT = S.queue[i], fromT = deckTrack[from];
+  deckTrack[to] = toT;
+  players[to].loadVideoById({videoId: toT.id, startSeconds: introOffset(toT)});
+  players[to].setVolume(0);
+  if(MOBILE){ try{ players[to].mute(); }catch(e){} }
+  players[to].playVideo();
+  if(MOBILE) setTimeout(()=>{
+    try{
+      players[to].unMute();
+      const st = players[to].getPlayerState();
+      if(st === -1 || st === 5)
+        status("Your phone blocked the incoming deck — tap its video once to unblock autoplay.");
+    }catch(e){}
+  }, 800);
+  setFront(to);
+  if(plan.label) status("Transition: " + plan.label + ".");
+  const t0 = performance.now(), dur = Math.max(plan.secs * 1000, 400);
+  clearInterval(fadeTimer);
+  fadeTimer = setInterval(()=>{
+    const k = Math.min((performance.now()-t0)/dur, 1);
+    const kk = Math.sin(k*Math.PI/2)**2;                       // equal-power
+    try{
+      players[to].setVolume(Math.round(kk * S.vol * vmul(toT)));
+      players[from].setVolume(Math.round((1-kk) * S.vol * vmul(fromT)));
+    }catch(e){}
+    meter(to, kk * S.vol); meter(from, (1-kk) * S.vol);
+    if(k >= 1){
+      clearInterval(fadeTimer);
+      try{ players[from].stopVideo(); players[to].unMute();
+           players[to].setVolume(Math.round(S.vol * vmul(toT))); }catch(e){}
+      active = to; S.transitioning = false;
+      afterTrackChange();
+    }
+  }, 50);
+}
+function endSet(){
+  S.playing = false; S.transitioning = false; clearInterval(fadeTimer);
+  keepAwake(false);
+  try{ players.A.stopVideo(); players.B.stopVideo(); }catch(e){}
+  status("Set finished — the queue has run out.");
+  renderNow(); renderQueue(); renderButtons();
+}
+function pauseResume(){
+  const p = players[active]; if(!p || !p.getPlayerState) return;
+  if(p.getPlayerState() === YT.PlayerState.PLAYING){ p.pauseVideo(); $("btnPause").textContent="Resume"; }
+  else { p.playVideo(); $("btnPause").textContent="Pause"; }
+}
+function afterTrackChange(){
+  S.insertAt = null;
+  $("btnPause").textContent="Pause";
+  renderNow(); renderQueue(); renderButtons(); save();
+}
+
+/* ------- monitor loop: progress + trigger crossfade near track end ------- */
+setInterval(()=>{
+  if(!ytReady) return;
+  const p = players[active];
+  if(p && p.getDuration && S.playing){
+    const d = p.getDuration(), t = p.getCurrentTime();
+    if(d > 1){
+      const curTr = S.queue[S.pos];
+      const fade = transitionPlan(curTr, S.queue[nextIndex()]).secs;
+      let effEnd = S.cap > 0 ? Math.min(d, Math.max(S.cap, fade + 2)) : d;
+      if(S.smart && S.cap > 0 && curTr && curTr.bpm > 40){
+        const phrase = 32 * 60 / curTr.bpm;          // 8 bars of 4 beats
+        const q = Math.floor(effEnd / phrase) * phrase;
+        if(q >= Math.max(phrase, fade + 2)) effEnd = Math.min(q, d);
+      }
+      $("prog").style.width = (Math.min(t,effEnd)/effEnd*100)+"%";
+      $("tCur").textContent = fmt(t);
+      $("tDur").textContent = effEnd < d ? fmt(effEnd)+" of "+fmt(d) : fmt(d);
+      if(!S.transitioning){
+        meter(active, p.getPlayerState()===YT.PlayerState.PLAYING ? S.vol : 0);
+        meter(other(active), 0);
+        const rem = effEnd - t;
+        if(hasNext()){
+          if(fade > 0 && rem <= fade) advance(false);
+          else if(fade <= 0 && rem <= 0.35) advance(true);
+        }
+      }
+    }
+  }
+}, 300);
+
+function meter(deck, v){
+  const el = $("deck"+deck);
+  el.querySelector(".bar i").style.width = (v/Math.max(S.vol,1)*100)+"%";
+  el.classList.toggle("live", v > 2);
+}
+function setFront(deck){
+  $("videoPh").style.display = "none";
+  $("hostA").classList.toggle("front", deck==="A");
+  $("hostB").classList.toggle("front", deck==="B");
+}
+
+/* ============================ queue ============================ */
+function addNextSmart(t){
+  // Insert right after the current song; repeated adds keep their order.
+  if(S.pos >= 0 && S.pos < S.queue.length){
+    let at = S.insertAt == null ? S.pos + 1 : S.insertAt;
+    at = Math.min(Math.max(at, S.pos + 1), S.queue.length);
+    S.queue.splice(at, 0, t);
+    S.insertAt = at + 1;
+  } else {
+    S.queue.push(t);
+  }
+  renderQueue(); renderNow(); renderButtons(); save();
+}
+function addTrack(t, playNext){
+  if(playNext && S.pos >= 0) S.queue.splice(S.pos+1, 0, t);
+  else S.queue.push(t);
+  renderQueue(); save();
+}
+function renderNow(){
+  const cur = S.queue[S.pos];
+  if(S.playing && cur){
+    $("nowLabel").textContent = "Now playing — deck " + active
+      + (cur.bpm > 40 ? " · " + Math.round(cur.bpm) + " bpm" : "");
+    $("nowTitle").textContent = cur.title;
+    $("nowArtist").textContent = cur.channel || "";
+    const nxt = S.queue[nextIndex()];
+    if(nxt) $("nowArtist").textContent += (cur.channel?"   ·   ":"") + "up next: " + nxt.title;
+  } else if(!S.playing){
+    $("nowLabel").textContent = S.queue.length ? "Paused between sets" : "Nothing playing yet";
+    if(!S.queue.length) $("nowTitle").textContent = "Load a playlist or search for songs to get started";
+  }
+}
+function renderButtons(){
+  $("btnPause").disabled = !S.playing;
+  $("btnSkip").disabled = !S.playing || !hasNext();
+  $("btnStart").textContent = S.playing ? "Restart from current" : "Start the set";
+}
+function renderQueue(){
+  const box = $("qlist"); box.innerHTML = "";
+  $("qEmpty").style.display = S.queue.length ? "none" : "block";
+  $("qCount").textContent = S.queue.length + (S.queue.length===1?" track":" tracks");
+  S.queue.forEach((t,i)=>{
+    const d = document.createElement("div");
+    d.className = "qitem" + (i<S.pos?" played":"") + (i===S.pos?" current":"") + (t.bad?" bad":"");
+    d.innerHTML = `<span class="n">${i+1}</span>
+      <span><span class="t">${hEsc(t.title)}</span>${t.bpm>40?'<span class="bpm">'+Math.round(t.bpm)+' bpm</span>':''}<br><span class="c">${hEsc(t.channel||"")}</span></span>
+      <span class="ops">
+        <button data-op="now" data-i="${i}">Play now</button>
+        <button data-op="rm" data-i="${i}">Remove</button>
+      </span>`;
+    box.appendChild(d);
+  });
+}
+$("qlist").addEventListener("click", e=>{
+  const b = e.target.closest("button"); if(!b) return;
+  const i = +b.dataset.i;
+  if(b.dataset.op === "rm"){
+    if(i === S.pos && S.playing){ status("That one's playing — skip it instead."); return; }
+    S.queue.splice(i,1);
+    if(i < S.pos) S.pos--;
+    S.insertAt = null;
+    renderQueue(); renderNow(); renderButtons(); save();
+  }
+  if(b.dataset.op === "now"){
+    S.pos = i; S.playing = true;
+    playOn(active, S.queue[i]);
+    afterTrackChange();
+  }
+});
+$("btnShuffle").onclick = ()=>{
+  const start = S.playing ? S.pos+1 : Math.max(S.pos+1,0);
+  const tail = S.queue.slice(start);
+  for(let i=tail.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [tail[i],tail[j]]=[tail[j],tail[i]]; }
+  S.queue = S.queue.slice(0,start).concat(tail);
+  renderQueue(); renderNow(); save();
+  status("Upcoming tracks shuffled.");
+};
+$("btnClear").onclick = ()=>{
+  S.queue = S.playing && S.queue[S.pos] ? [S.queue[S.pos]] : [];
+  S.pos = S.playing ? 0 : -1;
+  renderQueue(); renderNow(); renderButtons(); save();
+};
+
+/* ============================ playlist import ============================ */
+function parseListId(url){
+  const m = String(url||"").match(/[?&]list=([A-Za-z0-9_-]+)/) || String(url||"").match(/^([A-Za-z0-9_-]{10,})$/);
+  return m ? m[1] : null;
+}
+function parseVideoId(url){
+  const s = String(url||"").trim();
+  const m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/) ||
+            s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/) ||
+            s.match(/\/(?:shorts|embed|live)\/([A-Za-z0-9_-]{11})/);
+  if(m) return m[1];
+  if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  return null;
+}
+$("btnLoadPl").onclick = ()=>{
+  const raw = $("plBox").value.trim();
+  const vid = parseVideoId(raw);
+  const listId = parseListId(raw);
+  if(vid){
+    addVideoByLink(vid, !!(listId && listId !== vid));
+    $("plBox").value = "";
+  } else if(listId){
+    if(!ytReady){ status("Player is still loading — try again in a second."); return; }
+    status("Reading playlist…");
+    if(S.key){ importViaApi(listId); } else { importViaProbe(listId); }
+    $("plBox").value = "";
+  } else {
+    status("That doesn't look like a YouTube link — paste a video or playlist URL.");
+  }
+};
+$("plBox").addEventListener("keydown", e=>{ if(e.key==="Enter") $("btnLoadPl").onclick(); });
+async function addVideoByLink(vid, alsoHasList){
+  const t = {id:vid, title:"Loading title… ("+vid+")", channel:""};
+  addNextSmart(t);
+  status((S.playing ? "Added — it plays right after the current song."
+                    : "Added to the queue.") + (alsoHasList
+    ? " That link also carries a playlist — paste a link with only <b>list=</b> to import the whole thing."
+    : ""));
+  try{
+    if(!S.key) throw 0;
+    const r = await fetch("https://www.googleapis.com/youtube/v3/videos?part=snippet&id="
+      + vid + "&key=" + encodeURIComponent(S.key));
+    const j = await r.json();
+    const sn = j.items && j.items[0] && j.items[0].snippet;
+    if(!sn) throw 0;
+    t.title = esc(sn.title); t.channel = esc(sn.channelTitle);
+  }catch(e){
+    try{
+      const r = await fetch("https://noembed.com/embed?url=https://www.youtube.com/watch?v="+vid);
+      const j = await r.json();
+      t.title = j.title || ("YouTube track ("+vid+")");
+      t.channel = j.author_name || "";
+    }catch(e2){ t.title = "YouTube track ("+vid+")"; }
+  }
+  renderQueue(); renderNow(); save();
+}
+function importViaProbe(listId){
+  if(probe){ try{ probe.destroy(); }catch(e){} probe=null; $("probe").innerHTML=""; }
+  const holder = document.createElement("div"); holder.id = "probeP";
+  $("probe").appendChild(holder);
+  probe = new YT.Player("probeP", {
+    height:"1", width:"1", playerVars:{mute:1},
+    events:{ onReady: e => e.target.cuePlaylist({list:listId}) }
+  });
+  let tries = 0;
+  const poll = setInterval(()=>{
+    tries++;
+    let ids = [];
+    try{ ids = probe.getPlaylist() || []; }catch(e){}
+    if(ids.length){
+      clearInterval(poll);
+      const before = S.queue.length;
+      ids.forEach(id => S.queue.push({id, title:"Loading title… ("+id+")", channel:""}));
+      renderQueue(); save();
+      status("Added <b>"+ids.length+"</b> tracks from the playlist.");
+      hydrateTitles(before);
+      try{ probe.destroy(); }catch(e){} probe=null; $("probe").innerHTML="";
+    } else if(tries > 25){
+      clearInterval(poll);
+      status("Couldn't read that playlist — is it public? (Private and Mix playlists can't be loaded.)");
+    }
+  }, 400);
+}
+async function importViaApi(listId){
+  let token = "", added = 0, before = S.queue.length;
+  try{
+    for(let page=0; page<4; page++){
+      const r = await fetch("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50"
+        + "&playlistId="+encodeURIComponent(listId) + "&key="+encodeURIComponent(S.key)
+        + (token ? "&pageToken="+token : ""));
+      const j = await r.json();
+      if(j.error) throw new Error(j.error.message || "API error");
+      (j.items||[]).forEach(it=>{
+        const sn = it.snippet || {};
+        const vid = sn.resourceId && sn.resourceId.videoId;
+        if(vid && sn.title !== "Private video" && sn.title !== "Deleted video"){
+          S.queue.push({id:vid, title:esc(sn.title), channel:esc(sn.videoOwnerChannelTitle||"")});
+          added++;
+        }
+      });
+      token = j.nextPageToken; if(!token) break;
+    }
+    renderQueue(); save();
+    status("Added <b>"+added+"</b> tracks from the playlist.");
+  }catch(err){
+    status("Playlist API failed ("+hEsc(err.message)+") — falling back to keyless import.");
+    S.queue = S.queue.slice(0, before);
+    importViaProbe(listId);
+  }
+}
+/* best-effort titles for keyless imports (via noembed.com) */
+async function hydrateTitles(from){
+  const jobs = [];
+  for(let i=from;i<S.queue.length;i++){
+    const t = S.queue[i];
+    if(!t.title.startsWith("Loading title")) continue;
+    jobs.push((async ()=>{
+      try{
+        const r = await fetch("https://noembed.com/embed?url=https://www.youtube.com/watch?v="+t.id);
+        const j = await r.json();
+        if(j.title){ t.title = j.title; t.channel = j.author_name || ""; }
+        else t.title = "YouTube track ("+t.id+")";
+      }catch(e){ t.title = "YouTube track ("+t.id+")"; }
+    })());
+    if(jobs.length % 5 === 0) await Promise.allSettled(jobs.splice(0));
+  }
+  await Promise.allSettled(jobs);
+  renderQueue(); renderNow(); save();
+}
+
+/* ============================ search ============================ */
+function keyHint(){
+  $("keyHint").textContent = S.key
+    ? "Key saved — search and faster playlist import are on."
+    : "No key saved — search is off, playlists still work.";
+}
+$("btnSaveKey").onclick = ()=>{
+  S.key = $("apiKey").value.trim(); save(); keyHint();
+  status(S.key ? "API key saved (kept only in this browser)." : "API key cleared.");
+};
+async function runSearch(){
+  const q = $("searchBox").value.trim();
+  if(!q) return;
+  if(!S.key){ status("Search needs a YouTube API key — paste one in the field under the search box."); return; }
+  status("Searching…");
+  try{
+    const r = await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=12"
+      + "&q="+encodeURIComponent(q) + "&key="+encodeURIComponent(S.key));
+    const j = await r.json();
+    if(j.error) throw new Error(j.error.message || "API error");
+    const box = $("searchResults"); box.innerHTML = "";
+    (j.items||[]).forEach(it=>{
+      const sn = it.snippet, vid = it.id && it.id.videoId;
+      if(!vid) return;
+      const d = document.createElement("div");
+      d.className = "result";
+      d.innerHTML = `<img src="${sn.thumbnails?.medium?.url||sn.thumbnails?.default?.url||""}" alt="">
+        <span><span class="t">${hEsc(esc(sn.title))}</span><br><span class="c">${hEsc(esc(sn.channelTitle))}</span></span>
+        <span class="ops"><button>Add</button></span>`;
+      d.querySelector("button").onclick = ()=>{
+        addNextSmart({id:vid, title:esc(sn.title), channel:esc(sn.channelTitle)});
+        status("Added <b>"+hEsc(esc(sn.title))+"</b>"
+          + (S.playing ? " — it plays right after the current song." : " to the queue."));
+      };
+      box.appendChild(d);
+    });
+    status((j.items||[]).length ? "Pick the tracks to add." : "No results for that search.");
+  }catch(err){
+    status("Search failed: "+hEsc(err.message)+" — check the API key and that <b>YouTube Data API v3</b> is enabled.");
+  }
+}
+$("btnSearch").onclick = runSearch;
+$("searchBox").addEventListener("keydown", e=>{ if(e.key==="Enter") runSearch(); });
+
+/* ============================ controls wiring ============================ */
+$("btnStart").onclick = startSet;
+$("btnPause").onclick = pauseResume;
+$("btnSkip").onclick = ()=>{ if(S.playing && !S.transitioning) advance(false); };
+$("xfade").oninput = e=>{ S.xfade = +e.target.value; $("xfadeVal").textContent = S.xfade+"s"; save(); };
+$("cap").onchange = e=>{ S.cap = +e.target.value; save(); };
+$("smart").onchange = e=>{ S.smart = +e.target.value; save(); };
+$("auto").onchange = e=>{ S.auto = e.target.checked ? 1 : 0; save(); };
+$("intro").onchange = e=>{ S.intro = +e.target.value; save(); };
+$("vol").oninput = e=>{
+  S.vol = +e.target.value;
+  if(!S.transitioning){ try{ players[active].setVolume(Math.round(S.vol * vmul(deckTrack[active]))); }catch(err){} }
+  save();
+};
+
+/* ===================== track analysis (tempo & energy) =====================
+   The YouTube iframe exposes no audio, so tempo comes from outside:
+   1. Deezer's public catalog (keyless, JSONP) often has the track's BPM.
+   2. If not, Deezer's 30s preview clip is fetched and a real BPM estimate is
+      computed in the browser (onset autocorrelation via Web Audio).
+   3. Otherwise the title-keyword guess from the planner is all we have.
+   Runs quietly in the background; BPM chips appear on queue rows as it goes. */
+function jsonp(url){
+  return new Promise((resolve, reject)=>{
+    const cb = "dz_" + Math.random().toString(36).slice(2);
+    const sc = document.createElement("script");
+    const timer = setTimeout(()=>{ cleanup(); reject(new Error("timeout")); }, 8000);
+    function cleanup(){ clearTimeout(timer); delete window[cb]; sc.remove(); }
+    window[cb] = d => { cleanup(); resolve(d); };
+    sc.onerror = () => { cleanup(); reject(new Error("jsonp failed")); };
+    sc.src = url + (url.includes("?") ? "&" : "?") + "output=jsonp&callback=" + cb;
+    document.head.appendChild(sc);
+  });
+}
+function buildDeezerQuery(title){
+  let x = String(title||"")
+    .replace(/[\(\[][^\)\]]*(official|video|audio|lyric|lyrics|visuali|hd|4k|mv|remaster|color coded)[^\)\]]*[\)\]]/gi, "")
+    .replace(/\s*\|.*$/, "")
+    .replace(/\s*(official\s+(music\s+)?video|official\s+audio|lyrics?|audio)\s*$/i, "")
+    .trim();
+  const parts = x.split(" - ");
+  if(parts.length >= 2){
+    return 'artist:"' + parts[0].trim() + '" track:"' + parts.slice(1).join(" ").trim() + '"';
+  }
+  return x;
+}
+async function analyzeTrack(t){
+  t.an = 1;
+  try{
+    const q = buildDeezerQuery(t.title);
+    if(q){
+      const res = await jsonp("https://api.deezer.com/search?q=" + encodeURIComponent(q) + "&limit=1");
+      const hit = res && res.data && res.data[0];
+      if(hit){
+        const tr = await jsonp("https://api.deezer.com/track/" + hit.id);
+        if(tr){
+          if(tr.bpm > 40){ t.bpm = Math.round(tr.bpm); t.src = "deezer"; }
+          if(typeof tr.gain === "number") t.gain = tr.gain;
+          if((!t.bpm || t.bpm <= 40) && tr.preview){
+            const est = await bpmFromPreview(tr.preview);
+            if(est){ t.bpm = est.bpm; t.energy = est.energy; t.src = "preview"; }
+          }
+        }
+      }
+    }
+  }catch(e){}
+  t.an = 2;
+  renderQueue(); renderNow(); save();
+}
+async function bpmFromPreview(url){
+  try{
+    const r = await fetch(url);                 // works when the CDN allows CORS
+    const buf = await r.arrayBuffer();
+    const ac = new OfflineAudioContext(1, 22050, 22050);
+    const audio = await ac.decodeAudioData(buf);
+    const data = audio.getChannelData(0), sr = audio.sampleRate;
+    const hop = 512, win = 1024, env = [];
+    for(let i = 0; i + win < data.length; i += hop){
+      let acc = 0;
+      for(let j = 0; j < win; j += 4){ const v = data[i+j]; acc += v*v; }
+      env.push(Math.sqrt(acc / (win/4)));
+    }
+    if(env.length < 100) return null;
+    const nov = env.map((v,i)=> i ? Math.max(0, v - env[i-1]) : 0);
+    const fps = sr / hop;
+    const lo = Math.round(fps * 60 / 180), hi = Math.round(fps * 60 / 60);
+    let best = 0, bestLag = 0;
+    for(let lag = lo; lag <= hi; lag++){
+      let acc = 0;
+      for(let i = 0; i + lag < nov.length; i++) acc += nov[i] * nov[i+lag];
+      if(acc > best){ best = acc; bestLag = lag; }
+    }
+    if(!bestLag) return null;
+    let bpm = 60 * fps / bestLag;
+    while(bpm < 70) bpm *= 2;
+    while(bpm > 180) bpm /= 2;
+    const mean = env.reduce((a,b)=>a+b,0) / env.length;
+    const energy = Math.min(95, Math.max(5, Math.round(mean * 400)));
+    return {bpm: Math.round(bpm), energy};
+  }catch(e){ return null; }
+}
+setInterval(()=>{
+  const t = S.queue.find(x => !x.an && !x.bad && x.title && !x.title.startsWith("Loading title"));
+  if(t) analyzeTrack(t);
+}, 2500);
+
+/* ============================ AI set planning ============================ */
+function aiHintFn(){
+  $("aiHint").textContent = S.akey
+    ? "One-click Claude planning is on — it reorders the tracks that haven't played yet. Key stays in this browser."
+    : "Plan the set works with no key (built-in planner). For Claude-quality ordering free of charge: Copy prompt → paste it to Claude → paste the numbers back. An Anthropic API key makes that one click.";
+}
+$("btnSaveAKey").onclick = ()=>{
+  S.akey = $("aKey").value.trim(); save(); aiHintFn();
+  status(S.akey ? "Anthropic key saved." : "Anthropic key cleared.");
+};
+$("btnPlan").onclick = ()=>{ planSet(); };
+$("vibeBox").addEventListener("keydown", e=>{ if(e.key==="Enter") planSet(); });
+
+function upcomingSlice(){
+  const upStart = Math.max(S.pos + 1, 0);
+  return {
+    upStart,
+    upcoming: S.queue.slice(upStart).filter(t=>!t.bad),
+    bad: S.queue.slice(upStart).filter(t=>t.bad),
+  };
+}
+function commitOrder(upStart, tracks, bad, label){
+  S.queue = S.queue.slice(0, upStart).concat(tracks, bad);
+  S.insertAt = null;
+  renderQueue(); renderNow(); save();
+  status(label);
+}
+/* keyless planner: energy guess from title words, arc-shaped ordering */
+function energyScore(t){
+  const x = (t.title + " " + (t.channel||"")).toLowerCase();
+  let e = 50;
+  ["remix","club","extended","bootleg","festival","anthem","rave","bounce",
+   "hardstyle","big room","bass","banger","vip","mashup","dance"]
+    .forEach(w=>{ if(x.includes(w)) e += 14; });
+  ["acoustic","piano","slowed","reverb","lofi","lo-fi","chill","ambient",
+   "unplugged","ballad","stripped","interlude","cover","sunset"]
+    .forEach(w=>{ if(x.includes(w)) e -= 14; });
+  return Math.max(5, Math.min(95, e)) + (Math.random()*10 - 5);
+}
+function planLocal(vibe){
+  const {upStart, upcoming, bad} = upcomingSlice();
+  if(upcoming.length < 3){ status("Add at least 3 upcoming tracks before planning the set."); return; }
+  const withBpm = upcoming.filter(t=>t.bpm > 40).length;
+  const arr = upcoming.map(t=>{
+    let e;
+    if(typeof t.energy === "number") e = t.energy;
+    else if(t.bpm > 40) e = Math.max(10, Math.min(92, (t.bpm - 70) * 0.65 + 25));
+    else e = energyScore(t);
+    return {t, e: e + (Math.random()*6 - 3)};
+  }).sort((a,b)=>a.e-b.e);
+  let ordered;
+  if(/chill|lounge|dinner|background|study|sleep|calm/.test(vibe.toLowerCase())){
+    ordered = arr.map(x=>x.t);                               // stays gentle
+  } else {
+    const landing = arr.length >= 5 ? arr.splice(1,1)[0] : null; // keep a mellow one
+    ordered = arr.map(x=>x.t);                               // build to the peak…
+    if(landing) ordered.push(landing.t);                     // …then land gently
+  }
+  for(let i=1;i<ordered.length;i++){                          // space out same artist
+    if(ordered[i].channel && ordered[i].channel === ordered[i-1].channel){
+      for(let j=i+1;j<ordered.length;j++){
+        if(ordered[j].channel !== ordered[i-1].channel){
+          [ordered[i], ordered[j]] = [ordered[j], ordered[i]]; break;
+        }
+      }
+    }
+  }
+  commitOrder(upStart, ordered, bad,
+    "Set planned (built-in planner, real tempo on " + withBpm + " of " + upcoming.length + " tracks) for: <b>" + hEsc(vibe) + "</b>. "
+    + "Want it smarter? Use <b>Copy prompt</b> and let Claude order it.");
+}
+function buildPrompt(){
+  const {upcoming} = upcomingSlice();
+  if(upcoming.length < 3) return null;
+  const vibe = $("vibeBox").value.trim() || "a smooth party set with a gradual energy build";
+  const list = upcoming.map((t,i)=> i + ". " + t.title + (t.channel ? " — " + t.channel : "") + (t.bpm > 40 ? " [" + Math.round(t.bpm) + " bpm]" : "")).join("\n");
+  return "You are a DJ deciding the running order of a fixed tracklist. "
+    + "Reorder ALL the tracks into the best arc for this vibe: \"" + vibe + "\". "
+    + "Coherent genre flow, gradual build, peak late, gentle landing; avoid the same artist back-to-back. "
+    + "Reply with ONLY the track numbers in play order, comma-separated, using every number exactly once.\n\n" + list;
+}
+$("btnCopyPrompt").onclick = async ()=>{
+  const p = buildPrompt();
+  if(!p){ status("Add at least 3 upcoming tracks first."); return; }
+  let ok = false;
+  try{ await navigator.clipboard.writeText(p); ok = true; }
+  catch(e){
+    try{
+      const ta = document.createElement("textarea");
+      ta.value = p; document.body.appendChild(ta); ta.select();
+      ok = document.execCommand("copy"); ta.remove();
+    }catch(e2){}
+  }
+  $("orderRow").style.display = "flex";
+  status(ok
+    ? "Prompt copied — paste it to Claude (claude.ai), then paste the numbers it returns below and press Apply order."
+    : "Couldn't reach the clipboard — the Apply box below still works once you have the numbers.");
+};
+$("btnApplyOrder").onclick = ()=>{
+  const {upStart, upcoming, bad} = upcomingSlice();
+  const nums = ($("orderBox").value.match(/\d+/g) || []).map(Number);
+  const n = upcoming.length;
+  if(nums.length !== n || new Set(nums).size !== n || nums.some(i=>i<0 || i>=n)){
+    status("That order doesn't match the " + n + " upcoming tracks — expected the numbers 0 to " + (n-1) + ", each exactly once.");
+    return;
+  }
+  commitOrder(upStart, nums.map(i=>upcoming[i]), bad, "Order applied — upcoming tracks reordered.");
+  $("orderBox").value = "";
+};
+$("orderBox").addEventListener("keydown", e=>{ if(e.key==="Enter") $("btnApplyOrder").onclick(); });
+
+async function planSet(){
+  const upStart = Math.max(S.pos + 1, 0);
+  const upcoming = S.queue.slice(upStart).filter(t=>!t.bad);
+  if(upcoming.length < 3){ status("Add at least 3 upcoming tracks before planning the set."); return; }
+  const vibe = $("vibeBox").value.trim() || "a smooth party set with a gradual energy build";
+  S.vibe = vibe; save();
+  if(!S.akey){ planLocal(vibe); return; }
+  status("Planning the set…");
+  const list = upcoming.map((t,i)=> i + ". " + t.title + (t.channel ? " — " + t.channel : "") + (t.bpm > 40 ? " [" + Math.round(t.bpm) + " bpm]" : "")).join("\n");
+  const sys = "You are a DJ deciding the running order of a FIXED tracklist. "
+    + "Reorder ALL the given tracks into the best arc for the host's vibe: coherent genre flow, "
+    + "gradual build, peak late, gentle landing; avoid the same artist back-to-back where possible. "
+    + "Respond ONLY with a JSON array of the track numbers in play order, e.g. [2,0,5]. "
+    + "Use every number exactly once. No prose, no markdown fences.";
+  try{
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": S.akey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-5-5", max_tokens: 1000, system: sys,
+        messages: [{role:"user", content: "Vibe: " + vibe + "\n\nTracks:\n" + list}]
+      })
+    });
+    const j = await r.json();
+    if(j.error) throw new Error(j.error.message || "API error");
+    const text = (j.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n")
+      .replace(/```json|```/g,"").trim();
+    const arrMatch = text.match(/\[[\s\S]*\]/);
+    if(!arrMatch) throw new Error("model returned no order");
+    const order = JSON.parse(arrMatch[0]);
+    const n = upcoming.length;
+    if(order.length !== n || new Set(order).size !== n
+       || order.some(i=>!Number.isInteger(i) || i < 0 || i >= n))
+      throw new Error("model returned an invalid order");
+    commitOrder(upStart, order.map(i=>upcoming[i]),
+      S.queue.slice(upStart).filter(t=>t.bad),
+      "Set planned with Claude for: <b>" + hEsc(vibe) + "</b> — upcoming tracks reordered.");
+  }catch(err){
+    status("Set planning failed: " + hEsc(err.message || String(err)) + ".");
+  }
+}
+
+/* ============================ boot ============================ */
+load();
+$("xfade").value = S.xfade; $("xfadeVal").textContent = S.xfade+"s";
+$("vol").value = S.vol;
+if(S.key) $("apiKey").value = S.key;
+if(S.akey) $("aKey").value = S.akey;
+$("cap").value = String(S.cap);
+$("smart").value = String(S.smart);
+$("auto").checked = !!S.auto;
+$("intro").value = String(S.intro);
+$("vibeBox").value = S.vibe || "";
+keyHint(); aiHintFn(); renderQueue(); renderNow(); renderButtons();
+if("serviceWorker" in navigator &&
+   (location.protocol === "https:" || ["localhost","127.0.0.1"].includes(location.hostname))){
+  navigator.serviceWorker.register("./sw.js").catch(()=>{});
+}
+</script>
+</body>
+</html>
