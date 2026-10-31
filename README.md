@@ -95,6 +95,16 @@ the YouTube player withholds:
   "beat-matched".
 - Loudness is measured per file, so leveling works without any lookup.
 
+**Songs in Google Drive — two routes:**
+1. No setup: tap "Add audio files" and pick **Drive** from the Android file
+   picker's side menu; the picker downloads the file and hands it to Booth.
+2. Paste a Drive link into the import box. This needs the file shared as
+   "Anyone with the link", plus one one-time switch: at
+   console.cloud.google.com, in the same project as your YouTube key, open
+   APIs & Services → Library → search **Google Drive API** → Enable. The
+   same API key then works for search and Drive import. (Private files
+   would need a full Google sign-in flow — ask if you ever want that.)
+
 Files live in the browser's IndexedDB: added once, available every session,
 never uploaded anywhere. Where to get legal files: your own rips/purchases,
 Bandcamp, Beatport (BPM/key included), DJ pools (Beatsource, DJcity), or

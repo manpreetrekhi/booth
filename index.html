@@ -216,8 +216,12 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
     <p>Add MP3/M4A/WAV files stored on this device. They play through Booth's own audio engine: keeps playing in the background with lock-screen controls, BPM and beat grid measured from the real audio, and beat-matched blends between local tracks.</p>
     <div class="inline" style="flex-wrap:wrap">
       <button class="primary" id="btnPickFiles">Add audio files</button>
-      <input type="file" id="filePick" accept="audio/*" multiple style="display:none">
+      <input type="file" id="filePick" accept="audio/*,video/webm,.webm,.weba,.opus,.ogg,.flac" multiple style="display:none">
       <button id="btnClearLib">Clear library</button>
+    </div>
+    <div class="inline" style="margin-top:10px">
+      <input type="text" id="driveBox" placeholder="Or paste a Google Drive link to an audio file…">
+      <button id="btnDrive">Import</button>
     </div>
     <div class="results" id="libList"></div>
     <div class="hint" id="libHint">No files yet. Files are stored in this browser (IndexedDB) and stay available next time.</div>
@@ -1012,6 +1016,47 @@ $("filePick").onchange = async e=>{
   for(const f of Array.from(e.target.files)) await importFile(f);
   e.target.value = "";
 };
+function driveId(url){
+  const x = String(url||"").trim();
+  const m = x.match(/\/d\/([A-Za-z0-9_-]{15,})/) || x.match(/[?&]id=([A-Za-z0-9_-]{15,})/);
+  return m ? m[1] : null;
+}
+$("btnDrive").onclick = ()=>{ importDrive(); };
+$("driveBox").addEventListener("keydown", e=>{ if(e.key==="Enter") importDrive(); });
+async function importDrive(){
+  const id = driveId($("driveBox").value);
+  if(!id){ status("That doesn't look like a Google Drive file link."); return; }
+  if(!S.key){
+    status("Drive import needs your Google API key (the key field under Find songs), with the <b>Google Drive API</b> enabled for it at console.cloud.google.com.");
+    return;
+  }
+  status("Checking the Drive file…");
+  try{
+    let r = await fetch("https://www.googleapis.com/drive/v3/files/" + id
+      + "?fields=name,mimeType,size&key=" + encodeURIComponent(S.key));
+    let j = await r.json();
+    if(j.error){
+      const c = j.error.code;
+      status("Drive import failed: " + hEsc(
+        (c === 404 || c === 403)
+          ? "Drive said no (" + c + "). The file must be shared as \u201CAnyone with the link\u201D, and the Google Drive API must be enabled for your key."
+          : (j.error.message || "Drive error")));
+      return;
+    }
+    status("Downloading <b>" + hEsc(j.name || "file") + "</b> from Drive…");
+    r = await fetch("https://www.googleapis.com/drive/v3/files/" + id
+      + "?alt=media&key=" + encodeURIComponent(S.key));
+    if(!r.ok){ status("Drive download failed (HTTP " + r.status + ")."); return; }
+    const blob = await r.blob();
+    if(!/audio|mp4|mpeg|webm|ogg|flac|octet/.test((blob.type || j.mimeType || "")))
+      status("Heads up: this doesn't look like an audio file (" + hEsc(blob.type || j.mimeType || "unknown type") + ") — importing anyway…");
+    await importFile(new File([blob], j.name || ("drive-" + id + ".mp3"),
+                              {type: blob.type || j.mimeType || "audio/mpeg"}));
+    $("driveBox").value = "";
+  }catch(err){
+    status("Drive import failed: " + hEsc(err.message || String(err)));
+  }
+}
 async function importFile(f){
   const id = "loc_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
   const meta = {id, kind:"local", title: f.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim(),
