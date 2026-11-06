@@ -276,7 +276,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
   <div class="empty" id="qEmpty">The queue is empty. Load a playlist or search for songs.</div>
 </section>
 
-<div class="status"><div class="wrap" id="status">Ready · build 7. If the player stays black, serve the folder over http (see README).</div></div>
+<div class="status"><div class="wrap" id="status">Ready · build 8. If the player stays black, serve the folder over http (see README).</div></div>
 
 <!-- probe player used only to read playlist IDs without an API key -->
 <div id="probe" style="position:fixed;width:1px;height:1px;left:-9999px;top:-9999px"></div>
@@ -599,14 +599,18 @@ setInterval(()=>{
     if(d > 1){
       const curTr = S.queue[S.pos];
       const fade = transitionPlan(curTr, S.queue[nextIndex()]).secs;
-      let effEnd = S.cap > 0 ? Math.min(d, Math.max(S.cap, fade + 2)) : d;
+      const startAt = Math.min(introOffset(curTr), Math.max(0, d - 10));
+      let effEnd = S.cap > 0
+        ? Math.min(d, startAt + Math.max(S.cap, fade + 2))   // cap counts from the cue
+        : d;
       if(S.smart && S.cap > 0 && curTr && curTr.bpm > 40){
-        const phrase = 32 * 60 / curTr.bpm;          // 8 bars of 4 beats
-        const q = Math.floor(effEnd / phrase) * phrase;
-        if(q >= Math.max(phrase, fade + 2)) effEnd = Math.min(q, d);
+        const phrase = 32 * 60 / curTr.bpm;                  // 8 bars of 4 beats
+        const q = startAt + Math.floor((effEnd - startAt) / phrase) * phrase;
+        if(q >= startAt + Math.max(phrase, fade + 2)) effEnd = Math.min(q, d);
       }
-      if(curTr && curTr.until > 1) effEnd = Math.min(effEnd, Math.max(curTr.until, fade + 1));
-      $("prog").style.width = (Math.min(t,effEnd)/effEnd*100)+"%";
+      if(curTr && curTr.until > 1) effEnd = Math.min(effEnd, Math.max(curTr.until, startAt + fade + 1));
+      const span = Math.max(effEnd - startAt, 1);
+      $("prog").style.width = (Math.min(Math.max(t - startAt, 0), span) / span * 100) + "%";
       $("tCur").textContent = fmt(t);
       $("tDur").textContent = effEnd < d ? fmt(effEnd)+" of "+fmt(d) : fmt(d);
       if(!S.transitioning){
@@ -1013,7 +1017,11 @@ let qcat = null;                          // active category filter
 function loadCatalog(){                   // append every built-in song not yet queued
   const have = new Set(S.queue.filter(t => t.id).map(t => t.id));
   let n = 0;
-  BUILTIN_TRACKS.forEach(e=>{
+  const isEng = e => {
+    const c = TRACK_CATS[e.i] || [];
+    return c.length > 0 && c.every(x => x.indexOf("English") === 0);
+  };
+  BUILTIN_TRACKS.filter(e => !isEng(e)).concat(BUILTIN_TRACKS.filter(isEng)).forEach(e=>{
     if(have.has(e.i)) return;
     const t = {id: e.i, title: e.t, channel: "", an: 2};
     if(e.c != null) t.cue = e.c;
