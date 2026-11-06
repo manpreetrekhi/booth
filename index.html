@@ -114,8 +114,9 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 
 /* ---------------- queue ---------------- */
 .queuehead{display:flex;align-items:baseline;gap:14px;padding:24px 0 10px;flex-wrap:wrap}
-.qsearch{margin:0 0 12px}
-.qsearch input{width:100%;padding:11px 14px;font-size:15px}
+.qsearch{margin:0 0 12px;display:flex;gap:8px}
+.qsearch input{flex:1;padding:11px 14px;font-size:15px}
+.qsearch button{padding:0 16px;font-size:16px}
 .sets{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
 .sets button{padding:7px 13px;font-size:13.5px}
 .sets select{flex:1;min-width:210px}
@@ -256,6 +257,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
   </div>
   <div class="qsearch">
     <input type="text" id="qFilter" placeholder="Search the queue — song or artist…">
+    <button id="qClear" title="Clear search and go back to the full queue" style="display:none">✕</button>
   </div>
   <div class="sets" id="setsRow"></div>
   <div class="aibar">
@@ -748,7 +750,16 @@ function renderQueue(){
     }
   }
 }
-$("qFilter").addEventListener("input", renderQueue);
+$("qFilter").addEventListener("input", ()=>{
+  $("qClear").style.display = $("qFilter").value ? "" : "none";
+  renderQueue();
+});
+$("qClear").onclick = ()=>{
+  $("qFilter").value = ""; $("qClear").style.display = "none";
+  inlineYT.q = ""; inlineYT.items = [];
+  renderQueue();
+};
+$("qFilter").addEventListener("keydown", e=>{ if(e.key === "Escape") $("qClear").onclick(); });
 $("qlist").addEventListener("click", e=>{
   const b = e.target.closest("button"); if(!b) return;
   const i = +b.dataset.i;
@@ -764,6 +775,20 @@ $("qlist").addEventListener("click", e=>{
   }
   if(b.dataset.op === "now"){
     if(S.queue[i].pend){ status("Still finding this one on YouTube — give it a moment."); return; }
+    if(i < S.pos){
+      // Replay a finished song without rewinding the set: move it to just
+      // after the current position and play it; the set continues forward.
+      const [t] = S.queue.splice(i, 1);
+      S.pos--;
+      S.queue.splice(S.pos + 1, 0, t);
+      S.pos = S.pos + 1;
+      S.insertAt = null;
+      S.playing = true;
+      playOn(active, t);
+      afterTrackChange();
+      status("Replaying <b>" + hEsc(t.title) + "</b> — the set continues forward from here.");
+      return;
+    }
     S.pos = i; S.playing = true;
     playOn(active, S.queue[i]);
     afterTrackChange();
