@@ -32,6 +32,7 @@ header{display:flex;align-items:baseline;gap:14px;padding:26px 0 18px;border-bot
 .wordmark{font-variation-settings:"wdth" 125,"wght" 900;font-size:26px;letter-spacing:.5px}
 .wordmark em{font-style:normal;color:var(--amber)}
 header span{color:var(--dim)}
+header .ver{margin-left:auto;font-size:12.5px;border:1px solid var(--line);border-radius:9px;padding:2px 9px}
 
 /* ---------------- hero: the booth strip ---------------- */
 .booth{display:grid;grid-template-columns:1fr 380px;gap:28px;padding:26px 0;border-bottom:1px solid var(--line)}
@@ -149,6 +150,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 <header class="wrap">
   <div class="wordmark">BO<em>O</em>TH</div>
   <span>your YouTube auto-DJ</span>
+  <span class="ver" id="ver"></span>
 </header>
 
 <section class="booth wrap">
@@ -276,13 +278,14 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
   <div class="empty" id="qEmpty">The queue is empty. Load a playlist or search for songs.</div>
 </section>
 
-<div class="status"><div class="wrap" id="status">Ready · build 8. If the player stays black, serve the folder over http (see README).</div></div>
+<div class="status"><div class="wrap" id="status">Ready. If the player stays black, serve the folder over http (see README).</div></div>
 
 <!-- probe player used only to read playlist IDs without an API key -->
 <div id="probe" style="position:fixed;width:1px;height:1px;left:-9999px;top:-9999px"></div>
 
 <script>
 "use strict";
+const BUILD = "9";
 /* ============================ state ============================ */
 const S = {
   queue: [],        // {id,title,channel,bad}
@@ -1706,6 +1709,7 @@ if(!S.queue.length && BUILTIN_TRACKS.length){
     status("Your saved queue is from before the built-in catalog — tap <b>↻ Reload catalog</b> (next to the category dropdown) to add the " + missing + " missing songs.");
   }
 }
+$("ver").textContent = "build " + BUILD;
 keyHint(); aiHintFn(); renderQueue(); renderNow(); renderButtons();
 if("serviceWorker" in navigator &&
    (location.protocol === "https:" || ["localhost","127.0.0.1"].includes(location.hostname))){
