@@ -285,7 +285,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 
 <script>
 "use strict";
-const BUILD = "9";
+const BUILD = "10";
 /* ============================ state ============================ */
 const S = {
   queue: [],        // {id,title,channel,bad}
@@ -886,11 +886,14 @@ function importViaProbe(listId){
     try{ ids = probe.getPlaylist() || []; }catch(e){}
     if(ids.length){
       clearInterval(poll);
-      const before = S.queue.length;
-      ids.forEach(id => S.queue.push({id, title:"Loading title… ("+id+")", channel:"", src:"imp"}));
+      const at = bulkInsertIndex();
+      ids.forEach((id, k) => S.queue.splice(at + k, 0,
+        {id, title:"Loading title… ("+id+")", channel:"", src:"imp"}));
+      clearCatFilter();
       renderQueue(); save();
-      status("Added <b>"+ids.length+"</b> tracks from the playlist.");
-      hydrateTitles(before);
+      status("Added <b>"+ids.length+"</b> playlist tracks into the main list (before the English section) — also under the Imported filter.");
+      hydrateTitles(at);
+      revealQueueIndex(at);
       try{ probe.destroy(); }catch(e){} probe=null; $("probe").innerHTML="";
     } else if(tries > 25){
       clearInterval(poll);
@@ -899,7 +902,7 @@ function importViaProbe(listId){
   }, 400);
 }
 async function importViaApi(listId){
-  let token = "", added = 0, before = S.queue.length;
+  let token = "", added = [];
   try{
     for(let page=0; page<4; page++){
       const r = await fetch("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50"
@@ -911,17 +914,19 @@ async function importViaApi(listId){
         const sn = it.snippet || {};
         const vid = sn.resourceId && sn.resourceId.videoId;
         if(vid && sn.title !== "Private video" && sn.title !== "Deleted video"){
-          S.queue.push({id:vid, title:esc(sn.title), channel:esc(sn.videoOwnerChannelTitle||""), src:"imp"});
-          added++;
+          added.push({id:vid, title:esc(sn.title), channel:esc(sn.videoOwnerChannelTitle||""), src:"imp"});
         }
       });
       token = j.nextPageToken; if(!token) break;
     }
+    const at = bulkInsertIndex();
+    added.forEach((t, k) => S.queue.splice(at + k, 0, t));
+    clearCatFilter();
     renderQueue(); save();
-    status("Added <b>"+added+"</b> tracks from the playlist.");
+    status("Added <b>"+added.length+"</b> playlist tracks into the main list (before the English section) — also under the Imported filter.");
+    revealQueueIndex(at);
   }catch(err){
     status("Playlist API failed ("+hEsc(err.message)+") — falling back to keyless import.");
-    S.queue = S.queue.slice(0, before);
     importViaProbe(listId);
   }
 }
@@ -1034,6 +1039,30 @@ function loadCatalog(){                   // append every built-in song not yet 
   if(n){ renderQueue(); renderButtons(); save(); }
   return n;
 }
+function isEnglishId(id){
+  const c = TRACK_CATS[id] || [];
+  return c.length > 0 && c.every(x => x.indexOf("English") === 0);
+}
+function bulkInsertIndex(){
+  // Bulk imports join the main body of the playlist: just before the
+  // English tail of the catalog, and never before the current song.
+  let i = S.queue.length;
+  while(i > 0){
+    const t = S.queue[i-1];
+    if(t && t.id && !t.src && t.kind !== "local" && isEnglishId(t.id)) i--;
+    else break;
+  }
+  return Math.max(i, S.pos + 1);
+}
+function clearCatFilter(){
+  qcat = null;
+  const cs = $("setsRow").querySelector("select");
+  if(cs) cs.value = "";
+}
+function revealQueueIndex(i){
+  const el = $("qlist").children[i];
+  if(el && el.scrollIntoView) el.scrollIntoView({block: "center", behavior: "smooth"});
+}
 (function renderSets(){
   const row = $("setsRow"); if(!row) return;
   const names = Object.keys(BUILTIN_SETS);
@@ -1070,7 +1099,7 @@ function toSec(x){
 $("btnListImport").onclick = ()=>{
   const rawLines = $("listArea").value.split(/\r?\n/).map(x=>x.trim()).filter(x=>x.length>2);
   if(!rawLines.length){ status("Paste at least one line first."); return; }
-  const before = S.queue.length;
+  const newEntries = [];
   let direct = 0, named = 0;
   rawLines.forEach(line=>{
     const urlM = line.match(/https?:\/\/\S+/);
@@ -1099,11 +1128,15 @@ $("btnListImport").onclick = ()=>{
       entry.pend = 1; entry.title = title; entry.channel = "waiting to find on YouTube…";
       named++;
     } else return;
-    S.queue.push(entry);
+    newEntries.push(entry);
   });
+  const at = bulkInsertIndex();
+  newEntries.forEach((t, k) => S.queue.splice(at + k, 0, t));
+  clearCatFilter();
   renderQueue(); save();
   $("listArea").value = ""; $("listBox").style.display = "none";
-  hydrateTitles(before);
+  hydrateTitles(at);
+  revealQueueIndex(at);
   let msg = "Queued " + (direct + named) + " songs";
   if(direct) msg += " — " + direct + " with links, playable right away";
   if(named) msg += (S.key ? "; " + named + " names resolving in the background"
