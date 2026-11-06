@@ -118,7 +118,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 .qsearch input{width:100%;padding:11px 14px;font-size:15px}
 .sets{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
 .sets button{padding:7px 13px;font-size:13.5px}
-.sets button.on{border-color:var(--amber-deep);color:var(--amber);box-shadow:0 0 10px rgba(232,180,76,.15)}
+.sets select{flex:1;min-width:210px}
 .queuehead h2{font-variation-settings:"wdth" 110,"wght" 700;font-size:17px}
 .queuehead span{color:var(--dim);font-size:13.5px}
 .queuehead .spacer{flex:1}
@@ -713,8 +713,38 @@ function renderQueue(){
     $("qCount").textContent = shown + " of " + S.queue.length + " match";
     if(!shown && S.queue.length){
       const d2 = document.createElement("div"); d2.className = "empty";
-      d2.textContent = "No queued track matches that search.";
+      d2.textContent = qcat && !f ? "Nothing in this category matches." : "No queued track matches that search.";
       box.appendChild(d2);
+    }
+    if(f && f.length > 2 && inlineYT.q !== f){
+      const w = document.createElement("div"); w.style.margin = "10px 0";
+      const b = document.createElement("button");
+      b.textContent = "Search YouTube for “" + f + "”";
+      b.onclick = ()=> ytInlineSearch(f);
+      w.appendChild(b); box.appendChild(w);
+    }
+    if(f && inlineYT.q === f && inlineYT.items.length){
+      const h = document.createElement("div"); h.className = "empty";
+      h.style.padding = "12px 0 4px"; h.textContent = "From YouTube:";
+      box.appendChild(h);
+      const have = new Set(S.queue.filter(t => t.id).map(t => t.id));
+      inlineYT.items.forEach(it=>{
+        const d3 = document.createElement("div"); d3.className = "qitem";
+        d3.innerHTML = `<span class="n">▸</span>
+          <span><span class="t">${hEsc(it.title)}</span><br><span class="c">${hEsc(it.channel)}</span></span>
+          <span class="ops"></span>`;
+        const btn = document.createElement("button");
+        const inQ = have.has(it.id);
+        btn.textContent = inQ ? "In queue" : "Next";
+        btn.disabled = inQ;
+        btn.onclick = ()=>{
+          addNextSmart({id: it.id, title: it.title, channel: it.channel, src: "imp"});
+          status("Added <b>" + hEsc(it.title) + "</b>"
+            + (S.playing ? " — it plays right after the current song." : " to the queue."));
+        };
+        d3.querySelector(".ops").appendChild(btn);
+        box.appendChild(d3);
+      });
     }
   }
 }
@@ -924,6 +954,24 @@ async function runSearch(){
     status("Search failed: "+hEsc(err.message)+" — check the API key and that <b>YouTube Data API v3</b> is enabled.");
   }
 }
+const inlineYT = {q: "", items: []};
+async function ytInlineSearch(q){
+  if(!S.key){ status("Searching YouTube needs your API key (the field under Find songs)."); return; }
+  status("Searching YouTube for “" + hEsc(q) + "”…");
+  try{
+    const r = await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8"
+      + "&q=" + encodeURIComponent(q) + "&key=" + encodeURIComponent(S.key));
+    const j = await r.json();
+    if(j.error) throw new Error(j.error.message || "API error");
+    inlineYT.q = q;
+    inlineYT.items = (j.items || []).filter(it => it.id && it.id.videoId).map(it => ({
+      id: it.id.videoId, title: esc(it.snippet.title), channel: esc(it.snippet.channelTitle)}));
+    renderQueue();
+    status(inlineYT.items.length
+      ? "YouTube results for “" + hEsc(q) + "” are below the queue — Next queues one instantly."
+      : "Nothing found on YouTube for that either.");
+  }catch(err){ status("YouTube search failed: " + hEsc(err.message || String(err))); }
+}
 $("btnSearch").onclick = runSearch;
 $("searchBox").addEventListener("keydown", e=>{ if(e.key==="Enter") runSearch(); });
 
@@ -953,27 +1001,14 @@ function loadCatalog(){                   // append every built-in song not yet 
 (function renderSets(){
   const row = $("setsRow"); if(!row) return;
   const names = Object.keys(BUILTIN_SETS);
-  if(!names.length){ row.style.display = "none"; return; }
-  function markChips(){
-    row.querySelectorAll("button").forEach(x =>
-      x.classList.toggle("on", x.dataset.cat === qcat || (!qcat && x.dataset.all === "1")));
-  }
-  const all = document.createElement("button");
-  all.textContent = "All"; all.dataset.all = "1"; all.classList.add("on");
-  all.onclick = ()=>{ qcat = null; markChips(); renderQueue(); };
-  row.appendChild(all);
-  names.forEach(nm=>{
-    const b = document.createElement("button");
-    b.dataset.cat = nm;
-    b.textContent = nm + " (" + BUILTIN_SETS[nm].length + ")";
-    b.onclick = ()=>{ qcat = (qcat === nm ? null : nm); markChips(); renderQueue(); };
-    row.appendChild(b);
-  });
-  const imp = document.createElement("button");
-  imp.dataset.cat = "Imported";
-  imp.textContent = "Imported";
-  imp.onclick = ()=>{ qcat = (qcat === "Imported" ? null : "Imported"); markChips(); renderQueue(); };
-  row.appendChild(imp);
+  const sel = document.createElement("select");
+  const mk = (v, label)=>{ const o = document.createElement("option");
+    o.value = v; o.textContent = label; sel.appendChild(o); };
+  mk("", "All categories (" + BUILTIN_TRACKS.length + ")");
+  names.forEach(nm => mk(nm, nm + " (" + BUILTIN_SETS[nm].length + ")"));
+  mk("Imported", "Imported");
+  sel.onchange = ()=>{ qcat = sel.value || null; renderQueue(); };
+  row.appendChild(sel);
   const rl = document.createElement("button");
   rl.textContent = "↻ Reload catalog";
   rl.onclick = ()=>{
