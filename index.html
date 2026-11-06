@@ -276,7 +276,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
   <div class="empty" id="qEmpty">The queue is empty. Load a playlist or search for songs.</div>
 </section>
 
-<div class="status"><div class="wrap" id="status">Ready. If the player stays black, serve the folder over http (see README).</div></div>
+<div class="status"><div class="wrap" id="status">Ready · build 7. If the player stays black, serve the folder over http (see README).</div></div>
 
 <!-- probe player used only to read playlist IDs without an API key -->
 <div id="probe" style="position:fixed;width:1px;height:1px;left:-9999px;top:-9999px"></div>
@@ -1690,7 +1690,13 @@ $("intro").value = String(S.intro);
 $("vibeBox").value = S.vibe || "";
 if(!S.queue.length && BUILTIN_TRACKS.length){
   loadCatalog();
-  status("Loaded your full catalog — " + S.queue.length + " songs in one playlist. Filter with the chips or search; “Next” queues any song to play right after the current one.");
+  status("Loaded your full catalog — " + S.queue.length + " songs in one playlist. Filter with the category dropdown or search; “Next” queues any song to play right after the current one.");
+} else if(BUILTIN_TRACKS.length){
+  const have = new Set(S.queue.filter(t => t.id).map(t => t.id));
+  const missing = BUILTIN_TRACKS.reduce((n, e) => n + (have.has(e.i) ? 0 : 1), 0);
+  if(missing > 0){
+    status("Your saved queue is from before the built-in catalog — tap <b>↻ Reload catalog</b> (next to the category dropdown) to add the " + missing + " missing songs.");
+  }
 }
 keyHint(); aiHintFn(); renderQueue(); renderNow(); renderButtons();
 if("serviceWorker" in navigator &&
