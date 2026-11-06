@@ -65,6 +65,9 @@ button:disabled{opacity:.45;cursor:default}
 .controls label{color:var(--dim);font-size:13px;display:flex;align-items:center;gap:8px}
 input[type=range]{accent-color:var(--amber);width:110px}
 input[type=checkbox]{accent-color:var(--amber);width:16px;height:16px}
+textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:9px 12px;width:100%;resize:vertical}
+textarea:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.qitem.pend{opacity:.6}
 
 .video{position:relative;aspect-ratio:16/9;background:#0E0C14;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .video .ph{position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);text-align:center;padding:20px}
@@ -199,6 +202,15 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
       <button id="btnSaveKey">Save key</button>
     </div>
     <div class="hint" id="keyHint">No key saved — search is off, playlists still work.</div>
+    <div class="inline" style="margin-top:10px">
+      <button id="btnListToggle">Import a song list</button>
+    </div>
+    <div id="listBox" style="display:none;margin-top:8px">
+      <textarea id="listArea" rows="6" placeholder="Paste song names, one per line — from any list you like"></textarea>
+      <div class="inline" style="margin-top:8px">
+        <button class="primary" id="btnListImport">Add to queue</button>
+      </div>
+    </div>
   </div>
 
   <div class="panel">
@@ -217,6 +229,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
     <div class="inline" style="flex-wrap:wrap">
       <button class="primary" id="btnPickFiles">Add audio files</button>
       <input type="file" id="filePick" accept="audio/*,video/webm,.webm,.weba,.opus,.ogg,.flac" multiple style="display:none">
+      <button id="btnAddAll">Queue all</button>
       <button id="btnClearLib">Clear library</button>
     </div>
     <div class="inline" style="margin-top:10px">
@@ -233,6 +246,7 @@ select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
     <h2>Queue</h2>
     <span id="qCount">0 tracks</span>
     <div class="spacer"></div>
+    <input type="text" id="qFilter" placeholder="Search the queue…" style="max-width:220px">
     <button id="btnShuffle">Shuffle upcoming</button>
     <button id="btnClear">Clear queue</button>
   </div>
@@ -378,7 +392,7 @@ function onPlayerError(e){
 /* ============================ playback engine ============================ */
 function hasNext(){ return nextIndex() !== -1; }
 function nextIndex(){
-  for(let i=S.pos+1;i<S.queue.length;i++) if(!S.queue[i].bad) return i;
+  for(let i=S.pos+1;i<S.queue.length;i++) if(!S.queue[i].bad && !S.queue[i].pend) return i;
   return -1;
 }
 let wakeLock = null;
@@ -528,7 +542,9 @@ function endSet(){
   keepAwake(false);
   deckStop("A"); deckStop("B");
   if("mediaSession" in navigator){ try{ navigator.mediaSession.playbackState = "paused"; }catch(e){} }
-  status("Set finished — the queue has run out.");
+  status(S.queue.some(t=>t.pend && !t.bad)
+    ? "Paused — more songs are still being found on YouTube; press Start again when they appear."
+    : "Set finished — the queue has run out.");
   renderNow(); renderQueue(); renderButtons();
 }
 function pauseResume(){
@@ -648,9 +664,13 @@ function renderQueue(){
   const box = $("qlist"); box.innerHTML = "";
   $("qEmpty").style.display = S.queue.length ? "none" : "block";
   $("qCount").textContent = S.queue.length + (S.queue.length===1?" track":" tracks");
+  const f = ($("qFilter") ? $("qFilter").value : "").trim().toLowerCase();
+  let shown = 0;
   S.queue.forEach((t,i)=>{
+    if(f && !((t.title||"").toLowerCase().includes(f) || (t.channel||"").toLowerCase().includes(f))) return;
+    shown++;
     const d = document.createElement("div");
-    d.className = "qitem" + (i<S.pos?" played":"") + (i===S.pos?" current":"") + (t.bad?" bad":"");
+    d.className = "qitem" + (i<S.pos?" played":"") + (i===S.pos?" current":"") + (t.bad?" bad":"") + (t.pend?" pend":"");
     d.innerHTML = `<span class="n">${i+1}</span>
       <span><span class="t">${hEsc(t.title)}</span>${t.bpm>40?'<span class="bpm">'+Math.round(t.bpm)+' bpm</span>':''}<br><span class="c">${hEsc(t.channel||"")}</span></span>
       <span class="ops">
@@ -659,7 +679,16 @@ function renderQueue(){
       </span>`;
     box.appendChild(d);
   });
+  if(f){
+    $("qCount").textContent = shown + " of " + S.queue.length + " match";
+    if(!shown && S.queue.length){
+      const d2 = document.createElement("div"); d2.className = "empty";
+      d2.textContent = "No queued track matches that search.";
+      box.appendChild(d2);
+    }
+  }
 }
+$("qFilter").addEventListener("input", renderQueue);
 $("qlist").addEventListener("click", e=>{
   const b = e.target.closest("button"); if(!b) return;
   const i = +b.dataset.i;
@@ -671,6 +700,7 @@ $("qlist").addEventListener("click", e=>{
     renderQueue(); renderNow(); renderButtons(); save();
   }
   if(b.dataset.op === "now"){
+    if(S.queue[i].pend){ status("Still finding this one on YouTube — give it a moment."); return; }
     S.pos = i; S.playing = true;
     playOn(active, S.queue[i]);
     afterTrackChange();
@@ -864,6 +894,59 @@ async function runSearch(){
 $("btnSearch").onclick = runSearch;
 $("searchBox").addEventListener("keydown", e=>{ if(e.key==="Enter") runSearch(); });
 
+/* ====================== bulk list import + background resolver ======================
+   Paste song names (from any list page, a blog, a WhatsApp message). Each name
+   is queued as "pending" and a background loop finds its YouTube video via the
+   Data API — one lookup every few seconds, nearest-to-playing first. YouTube's
+   free quota covers roughly 100 lookups a day; leftovers resume next day. */
+$("btnListToggle").onclick = ()=>{
+  const b = $("listBox");
+  b.style.display = b.style.display === "none" ? "block" : "none";
+};
+$("btnListImport").onclick = ()=>{
+  const lines = $("listArea").value.split(/\r?\n/)
+    .map(x => x.replace(/^\s*\d+[\).:\-]?\s*/, "").replace(/^[\-•·*]\s*/, "").trim())
+    .filter(x => x.length > 2);
+  if(!lines.length){ status("Paste at least one song name first."); return; }
+  lines.forEach(name => S.queue.push({pend:1, title:name, channel:"waiting to find on YouTube…", an:2}));
+  renderQueue(); save();
+  $("listArea").value = ""; $("listBox").style.display = "none";
+  if(!S.key){
+    status("Queued " + lines.length + " names — finding them needs your YouTube API key (field under the search box).");
+  } else {
+    status("Queued " + lines.length + " names — finding each on YouTube in the background."
+      + (lines.length > 90 ? " Note: the free YouTube quota resolves ~100 songs a day; the rest continue tomorrow." : ""));
+  }
+};
+let resolverDown = false;
+setInterval(async ()=>{
+  if(resolverDown || !S.key) return;
+  let idx = S.queue.findIndex((t,i)=> t.pend && !t.bad && i >= S.pos);
+  if(idx === -1) idx = S.queue.findIndex(t => t.pend && !t.bad);
+  if(idx === -1) return;
+  const t = S.queue[idx];
+  try{
+    const r = await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1"
+      + "&q=" + encodeURIComponent(t.title) + "&key=" + encodeURIComponent(S.key));
+    const j = await r.json();
+    if(j.error){
+      if(/quota/i.test(JSON.stringify(j.error))){
+        resolverDown = true;
+        status("YouTube's daily search quota is used up — the remaining names resolve automatically tomorrow.");
+      }
+      return;
+    }
+    const it = (j.items || [])[0];
+    if(it && it.id && it.id.videoId){
+      t.id = it.id.videoId; delete t.pend;
+      t.title = esc(it.snippet.title); t.channel = esc(it.snippet.channelTitle);
+    } else {
+      t.bad = true; t.channel = "not found on YouTube";
+    }
+    renderQueue(); renderNow(); renderButtons(); save();
+  }catch(e){}
+}, 4000);
+
 /* ============================ controls wiring ============================ */
 $("btnStart").onclick = startSet;
 $("btnPause").onclick = pauseResume;
@@ -966,7 +1049,7 @@ async function bpmFromPreview(url){
   }catch(e){ return null; }
 }
 setInterval(()=>{
-  const t = S.queue.find(x => !x.an && !x.bad && x.kind !== "local" && x.title && !x.title.startsWith("Loading title"));
+  const t = S.queue.find(x => !x.an && !x.bad && !x.pend && x.kind !== "local" && x.title && !x.title.startsWith("Loading title"));
   if(t) analyzeTrack(t);
 }, 2500);
 
@@ -1065,7 +1148,8 @@ async function importFile(f){
   try{
     await idbPut("blobs", id, f);
     await idbPut("meta", undefined, meta);
-    status("Saved <b>" + hEsc(meta.title) + "</b> — measuring tempo…");
+    addNextSmart({id, kind:"local", title: meta.title, channel:"Local file", an:2});
+    status("Added <b>" + hEsc(meta.title) + "</b> to the queue — measuring tempo…");
     analyzeLocal(meta);
   }catch(err){
     L.lib.delete(id); renderLib();
@@ -1156,6 +1240,18 @@ function renderLib(){
     box.appendChild(d);
   });
 }
+$("btnAddAll").onclick = ()=>{
+  const have = new Set(S.queue.filter(t => t.kind === "local" && !t.bad).map(t => t.id));
+  let n = 0;
+  [...L.lib.values()].sort((a,b)=>a.title.localeCompare(b.title)).forEach(m=>{
+    if(have.has(m.id)) return;
+    addNextSmart({id:m.id, kind:"local", title:m.title, channel:"Local file",
+                  bpm:m.bpm, gain:m.gain, phase:m.phase, dur:m.dur, an:2});
+    n++;
+  });
+  status(n ? "Queued " + n + " file" + (n > 1 ? "s" : "") + " from your library."
+           : "Everything in the library is already in the queue.");
+};
 $("btnClearLib").onclick = async ()=>{
   for(const id of [...L.lib.keys()]){ try{ await idbDel("meta", id); await idbDel("blobs", id); }catch(e){} }
   L.lib.clear();
